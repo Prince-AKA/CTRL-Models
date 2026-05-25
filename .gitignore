@@ -1,0 +1,59 @@
+# 25 May 2026
+# Amir K Afshar
+# Prince
+
+# Gotta keep my repos clean!
+
+# MATLAB autosave and backup
+*.asv
+*.m~
+slprj/
+sccprj/
+codegen/
+*.autosave
+
+# Simulink generated files
+*.slxc
+*.mdl.r*
+*.slx.r*
+
+# MATLAB cache/preferences
+*.mex*
+*.p
+*.log
+
+# Figs and temp outputs
+*.fig~
+*.tmp
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Jupyter
+.ipynb_checkpoints/
+
+# VSCode
+.vscode/
+
+# Virtual envs
+venv/
+.env/
+
+# LaTeX aux files
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.out
+*.toc
+
+# Generated sim outputs
+output/
+results/
+temp/
