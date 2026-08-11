@@ -15,7 +15,7 @@
 % initial conditions.
 %
 % Total closed-loop simulations = N_param * N_IC
-% ==========================================================
+%% ==========================================================
 
 clear;
 clc;
@@ -101,7 +101,7 @@ V_max = 10;
 %
 % Every parameter realization is evaluated over exactly the
 % same set of initial conditions.
-% ==========================================================
+%% ==========================================================
 
 ICs = zeros(5,N_IC);
 
