@@ -8,4 +8,4 @@ documents, including figures, model and simulation scripts,
 selected referenced documents all related to the manuscript, 
 "Reduced-Order Observer-Based Control of Uncertain Nonlinear
 Multiphysics Systems with Application to Electromagnetic Stress 
-Regulation". It may be restructured and renamedin the future.
+Regulation". It may be restructured and renamed in the future.
