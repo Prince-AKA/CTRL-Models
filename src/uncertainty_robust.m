@@ -137,11 +137,11 @@ lambda_e = 1000;
 % ==========================================================
 
 % Pointwise tolerance used only for settling-time metric
-tol = 0.05;
+tol = 2e-2;
 
 % Robust final-window RMS tolerances
-tol_q    = 0.05;
-tol_qdot = 0.05;
+tol_q    = 1e-2;
+tol_qdot = 1e-2;
 
 % Final window used to assess robust convergence
 convergence_window = 0.5;
@@ -218,17 +218,23 @@ C = [
 % LQG Controller and Common LQE
 % ==========================================================
 
-Q = diag([100 10 5 5 1]);
-R = 1;
+Q = diag([100 40 10 10 1]);
+R = 0.25;
 
 K = lqr(A,B,Q,R);
 
 % Same observer/noise assumptions for both controllers
-W = 0.01*eye(5);
-V = 0.01*eye(4);
+W = 0.1*eye(5);
+V = 0.1*eye(4);
 
 % Common nominal LQE observer
-L = lqe(A,eye(5),C,W,V);
+L = [1.7923    0.0490    0.0005    0.0001;
+    1.1063    0.1373    0.0010    0.0011;
+    0.0049    0.8610    0.0049   -0.0000;
+    0.0005    0.0487    0.1538    0.0003;
+    0.0001   -0.0000    0.0003    0.0499];
+
+%= lqe(A,eye(5),C,W,V);
 
 %% =========================================================
 % SMC Parameters

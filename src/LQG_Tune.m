@@ -1,417 +1,923 @@
-%% ----------------------------------------------------------
-% Monte Carlo Configuration
-% ----------------------------------------------------------
+%% ==========================================================
+% LQG Monte Carlo Q/R/W/V Tuning
+%% ==========================================================
+%
+% Stage 1:
+%   Randomly sample independent LQR Q/R candidates using
+%   equal-probability stratification across specified
+%   scale intervals.
+%
+% Stage 2:
+%   Retain the strongest LQR controllers and randomly sample
+%   LQE W/V covariance scales using equal-probability
+%   stratification across specified scale intervals.
+%
+% All candidates use the exact same Monte Carlo initial
+% conditions for fair comparison.
+%
+% ==========================================================
 
-rng(7);
 
-% Number of fixed initial conditions
-N_IC = 1000;
+%% ==========================================================
+% Nominal Model Parameters
+%% ==========================================================
+
+M = 1.0;
+C_v = 0.3;
+K_v = 2.25;
+
+phi_p_0 = 1.0;
+T_0     = 0.0;
+V_e_0   = 1.0;
+
+alpha_B = 0.20;
+alpha_E = 0.12;
+
+gamma_Phi = 0.15;
+k_Phi     = 0.04;
+k_E       = 0.03;
+
+C_th = 1.0;
+h    = 0.25;
+
+tau_e = 0.10;
+
+
+%% ==========================================================
+% Linearized State-Space Model
+%% ==========================================================
+
+A = [ ...
+    0, 1, 0, 0, 0;
+    -K_v/M, -C_v/M, ...
+        2*alpha_B*phi_p_0/M, ...
+        0, ...
+        2*alpha_E*V_e_0/M;
+    0, 0, -gamma_Phi, 0, 0;
+    0, 0, ...
+        2*k_Phi*phi_p_0/C_th, ...
+        -h/C_th, ...
+        2*k_E*V_e_0/C_th;
+    0, 0, 0, 0, -1/tau_e];
+
+
+B = [ ...
+    0;
+    0;
+    0;
+    0;
+    1/tau_e];
+
+
+C = [ ...
+    1 0 0 0 0;
+    0 0 1 0 0;
+    0 0 0 1 0;
+    0 0 0 0 1];
+
+
+%% ==========================================================
+% Verify Linearized Model Matrices
+%% ==========================================================
+
+if ~exist('A','var')
+    error( ...
+        ['Matrix A was not found. ' ...
+         'Load or generate the reduced-order linear model ' ...
+         'before running this script.']);
+end
+
+if ~exist('B','var')
+    error( ...
+        ['Matrix B was not found. ' ...
+         'Load or generate the reduced-order linear model ' ...
+         'before running this script.']);
+end
+
+if ~exist('C','var')
+    error( ...
+        ['Matrix C was not found. ' ...
+         'Load or generate the measurement matrix ' ...
+         'before running this script.']);
+end
+
+
+%% ==========================================================
+% Basic Dimension Checks
+%% ==========================================================
+
+if ~isequal(size(A),[5 5])
+    error('A must be a 5 x 5 matrix.');
+end
+
+if ~isequal(size(B),[5 1])
+    error('B must be a 5 x 1 matrix.');
+end
+
+if size(C,2) ~= 5
+    error('C must have 5 columns.');
+end
+
+
+%% ==========================================================
+% Reproducibility
+%% ==========================================================
+%
+% A fixed random seed makes the Monte Carlo tuning study
+% reproducible while retaining random sampling.
+%
+% Change this value to obtain a different realization.
+%
+% ==========================================================
+
+rng(12345,'twister');
+
+
+%% ==========================================================
+% Simulation Settings
+%% ==========================================================
 
 Tsim = 10;
+
 tspan = 0:0.01:Tsim;
 
-% Initial-condition perturbation bounds
-q_max       = 0.30;
-q_dot_max   = 0.15;
-dphi_max    = 0.10;
-dT_max      = 0.08;
-dV_e_max    = 0.15;
-
-% Convergence criterion
-eps_q      = 1e-2;
-eps_q_dot  = 1e-2;
-
-% Settling criterion
-settle_tol = 2e-2;
-
-% Physical actuator-voltage saturation limit
-V_max = 15;
 
 %% ----------------------------------------------------------
+% Convergence Criterion
+%% ----------------------------------------------------------
+
+eps_q     = 1e-2;
+eps_q_dot = 1e-2;
+
+
+%% ----------------------------------------------------------
+% Settling Criterion
+%% ----------------------------------------------------------
+
+settle_tol = 2e-2;
+
+
+%% ----------------------------------------------------------
+% Physical Actuator-Voltage Saturation Limit
+%% ----------------------------------------------------------
+
+V_max = 10;
+
+
+%% ==========================================================
+% Nominal LQE Covariance Matrices
+%% ==========================================================
+%
+% W and V are subsequently scaled by randomly sampled
+% dimensionless factors.
+%
+% W_scale = 1 corresponds to I_5.
+%
+% V_scale = 1 corresponds to I_4.
+%
+% ==========================================================
+
+W_nominal = eye(5);
+
+V_nominal = eye(size(C,1));
+
+
+%% ==========================================================
 % Fixed Monte Carlo Initial-Condition Ensemble
-% ----------------------------------------------------------
+%% ==========================================================
 %
-% IMPORTANT:
+% Load the exact 1000 initial conditions generated previously
+% by MC_initial_conditions_1000.mat.
 %
-% Every controller and observer candidate is evaluated using
-% exactly the same 1000 initial conditions.
+% Every LQR and LQG candidate uses this identical ensemble.
 %
-% Therefore, differences between candidates are attributable
-% to the controller/observer design rather than differences
-% in the Monte Carlo ensemble.
-%
-% Total simulations:
-%
-%   Stage 1 = N_K_candidates * N_IC
-%   Stage 2 = N_top_K * N_L_candidates * N_IC
-%
-% where N_IC = 1000.
-%
+% ==========================================================
 
-ICs = zeros(N_IC,5);
+IC_file = 'MC_initial_conditions_1000.mat';
 
-for i = 1:N_IC
+if ~isfile(IC_file)
 
-    ICs(i,:) = [
-        q_max      * (2*rand - 1), ...
-        q_dot_max  * (2*rand - 1), ...
-        dphi_max   * (2*rand - 1), ...
-        dT_max     * (2*rand - 1), ...
-        dV_e_max   * (2*rand - 1)
-    ];
+    error( ...
+        'Required Monte Carlo IC file not found: %s', ...
+        IC_file);
 
 end
 
+S = load(IC_file);
+
+
+%% ----------------------------------------------------------
+% Identify Variables in IC File
+%% ----------------------------------------------------------
+
+vars = fieldnames(S);
+
+fprintf('\n');
+fprintf('Loaded Monte Carlo IC file: %s\n',IC_file);
+fprintf('Variables found in file:\n');
+
+for k = 1:numel(vars)
+
+    value = S.(vars{k});
+
+    if isnumeric(value)
+
+        fprintf( ...
+            '  %-30s [%s]\n', ...
+            vars{k}, ...
+            strjoin(string(size(value)),' x '));
+
+    else
+
+        fprintf( ...
+            '  %-30s (%s)\n', ...
+            vars{k}, ...
+            class(value));
+
+    end
+
+end
+
+
 %% ==========================================================
-% STAGE 1: LQR Q/R Controller Sweep
+% Locate Initial-Condition Matrix
+%% ==========================================================
+%
+% Expected format:
+%
+%   N x 5
+%
+% with columns:
+%
+%   [q, qdot, deltaPhi_p, deltaT, deltaV_e]
+%
 % ==========================================================
+
+ICs = [];
+
+for k = 1:numel(vars)
+
+    value = S.(vars{k});
+
+    if isnumeric(value) && ...
+            ismatrix(value) && ...
+            size(value,2) == 5
+
+        ICs = value;
+        IC_variable_name = vars{k};
+        break;
+
+    end
+
+end
+
+if isempty(ICs)
+
+    error([ ...
+        'Could not find a numeric N x 5 initial-condition ' ...
+        'matrix in %s. Expected columns: ' ...
+        '[q, qdot, deltaPhi_p, deltaT, deltaV_e].'], ...
+        IC_file);
+
+end
+
+
+%% ----------------------------------------------------------
+% Verify Number of Initial Conditions
+%% ----------------------------------------------------------
+
+N_IC = size(ICs,1);
+
+if N_IC ~= 1000
+
+    warning( ...
+        'Expected 1000 initial conditions, but found %d.', ...
+        N_IC);
+
+end
+
+
+%% ----------------------------------------------------------
+% Force IC Matrix to Double Precision
+%% ----------------------------------------------------------
+
+ICs = double(ICs);
+
+fprintf('\n');
+fprintf('Monte Carlo IC variable: %s\n', ...
+    IC_variable_name);
+
+fprintf('Number of ICs loaded: %d\n', ...
+    N_IC);
+
+fprintf('IC matrix dimensions: %d x %d\n', ...
+    size(ICs,1),size(ICs,2));
+
+fprintf('\nInitial-condition ranges:\n');
+
+fprintf('q          : [% .6f, % .6f]\n', ...
+    min(ICs(:,1)),max(ICs(:,1)));
+
+fprintf('qdot       : [% .6f, % .6f]\n', ...
+    min(ICs(:,2)),max(ICs(:,2)));
+
+fprintf('deltaPhi_p  : [% .6f, % .6f]\n', ...
+    min(ICs(:,3)),max(ICs(:,3)));
+
+fprintf('deltaT      : [% .6f, % .6f]\n', ...
+    min(ICs(:,4)),max(ICs(:,4)));
+
+fprintf('deltaV_e    : [% .6f, % .6f]\n', ...
+    min(ICs(:,5)),max(ICs(:,5)));
+
+fprintf('\n');
+fprintf( ...
+    'All LQR and LQG candidates will use these exact ICs.\n');
+
+
+%% ==========================================================
+% STAGE 1: Stratified-by-Scale Random LQR Q/R Sweep
+%% ==========================================================
 
 fprintf('\n');
 fprintf('=========================================================\n');
-fprintf('STAGE 1: LQR Q/R Controller Sweep\n');
+fprintf('STAGE 1: STRATIFIED-BY-SCALE RANDOM LQR Q/R SWEEP\n');
 fprintf('=========================================================\n');
 
-%% ----------------------------------------------------------
-% Q weighting candidates
-% ----------------------------------------------------------
-%
-% The nominal Q matrix is:
-%
-%   Q = diag([100 10 5 5 1])
-%
-% The sweep varies the relative importance of each state.
-%
-
-Qq_values   = [25 50 100 200 400];
-Qqd_values  = [2.5 5 10 20 40];
-
-Qphi_values = [1 2.5 5 10];
-QT_values   = [1 2.5 5 10];
-QVe_values  = [0.25 0.5 1 2.5];
-
-% Control penalty
-R_values = [0.25 0.5 1 2 4];
 
 %% ----------------------------------------------------------
-% Number of Q/R candidates
-% ----------------------------------------------------------
+% Number of Random Q/R Candidates
+%% ----------------------------------------------------------
 
-N_K_candidates = ...
-    length(Qq_values) * ...
-    length(Qqd_values) * ...
-    length(Qphi_values) * ...
-    length(QT_values) * ...
-    length(QVe_values) * ...
-    length(R_values);
+N_QR_candidates = 1000;
 
-fprintf('LQR Q/R candidates: %d\n',N_K_candidates);
-fprintf('Initial conditions per candidate: %d\n',N_IC);
-fprintf('Stage 1 nonlinear simulations: %d\n', ...
-    N_K_candidates*N_IC);
 
 %% ----------------------------------------------------------
-% Fixed nominal Kalman observer for Stage 1
-% ----------------------------------------------------------
-%
-% The observer is held fixed while searching for the best
-% state-feedback controller.
-%
-% This prevents the Q/R search from being confounded by
-% simultaneous changes in estimator dynamics.
-%
-
-W_nominal = diag([ ...
-    1e-3, ...
-    1e-2, ...
-    1e-4, ...
-    1e-4, ...
-    1e-3]);
-
-V_nominal = diag([ ...
-    1e-3, ...
-    1e-4, ...
-    1e-3, ...
-    1e-3]);
-
-L_nominal = lqe( ...
-    A, ...
-    eye(5), ...
-    C, ...
-    W_nominal, ...
-    V_nominal);
-
+% Number of Top LQR Controllers Retained
 %% ----------------------------------------------------------
-% Stage 1 result storage
-% ----------------------------------------------------------
 
-sweep_Q = zeros(N_K_candidates,5);
-sweep_R = zeros(N_K_candidates,1);
+N_top_K_requested = 20;
 
-sweep_success = zeros(N_K_candidates,1);
-sweep_RMS = zeros(N_K_candidates,1);
-sweep_energy = zeros(N_K_candidates,1);
-sweep_settle = zeros(N_K_candidates,1);
-sweep_maxVoltage = zeros(N_K_candidates,1);
-sweep_saturation = zeros(N_K_candidates,1);
-sweep_satDuration = zeros(N_K_candidates,1);
-
-sweep_K = zeros(N_K_candidates,5);
-
-candidate = 0;
 
 %% ==========================================================
-% Stage 1 Q/R Sweep
+% Stratified-by-Scale Sampling Intervals
+%% ==========================================================
+%
+% For each Q/R parameter:
+%
+%   1. One of the three intervals is selected with equal
+%      probability.
+%
+%   2. A value is sampled uniformly within that interval.
+%
+% Each parameter is sampled independently.
+%
+% No Cartesian product is formed.
+%
 % ==========================================================
 
-for iq = 1:length(Qq_values)
+Qq_intervals = [ ...
+    1    10;
+    10   100;
+    100  500];
 
-    for iqd = 1:length(Qqd_values)
 
-        for iphi = 1:length(Qphi_values)
+Qqd_intervals = [ ...
+    0.1    1;
+    1      10;
+    10     100];
 
-            for iT = 1:length(QT_values)
 
-                for iVe = 1:length(QVe_values)
+Qphi_intervals = [ ...
+    0.01   0.1;
+    0.1    1;
+    1      10];
 
-                    for ir = 1:length(R_values)
 
-                        candidate = candidate + 1;
+QT_intervals = [ ...
+    0.01   0.1;
+    0.1    1;
+    1      10];
 
-                        %% --------------------------------------------------
-                        % Construct Q and R
-                        % --------------------------------------------------
 
-                        Q_test = diag([ ...
-                            Qq_values(iq), ...
-                            Qqd_values(iqd), ...
-                            Qphi_values(iphi), ...
-                            QT_values(iT), ...
-                            QVe_values(iVe)]);
+QVe_intervals = [ ...
+    0.01   0.1;
+    0.1    1;
+    1      10];
 
-                        R_test = R_values(ir);
 
-                        %% --------------------------------------------------
-                        % Compute LQR gain
-                        % --------------------------------------------------
+R_intervals = [ ...
+    0.01   0.1;
+    0.1    1;
+    1      10];
 
-                        try
 
-                            K_test = lqr( ...
-                                A, ...
-                                B, ...
-                                Q_test, ...
-                                R_test);
+%% ==========================================================
+% Generate Stratified Q/R Candidates
+%% ==========================================================
 
-                        catch
+[Qq_random,Qq_interval_index] = ...
+    sample_equal_probability_intervals( ...
+    Qq_intervals, ...
+    N_QR_candidates);
 
-                            warning( ...
-                                'LQR failed for candidate %d.', ...
-                                candidate);
 
-                            continue;
+[Qqd_random,Qqd_interval_index] = ...
+    sample_equal_probability_intervals( ...
+    Qqd_intervals, ...
+    N_QR_candidates);
 
-                        end
 
-                        %% --------------------------------------------------
-                        % Candidate metric storage
-                        % --------------------------------------------------
+[Qphi_random,Qphi_interval_index] = ...
+    sample_equal_probability_intervals( ...
+    Qphi_intervals, ...
+    N_QR_candidates);
 
-                        RMS_i = zeros(N_IC,1);
-                        energy_i = zeros(N_IC,1);
-                        settle_i = zeros(N_IC,1);
-                        maxVoltage_i = zeros(N_IC,1);
 
-                        saturated_i = false(N_IC,1);
-                        saturationDuration_i = zeros(N_IC,1);
-                        converged_i = false(N_IC,1);
+[QT_random,QT_interval_index] = ...
+    sample_equal_probability_intervals( ...
+    QT_intervals, ...
+    N_QR_candidates);
 
-                        %% ==================================================
-                        % Monte Carlo simulations
-                        % ==================================================
 
-                        for i = 1:N_IC
+[QVe_random,QVe_interval_index] = ...
+    sample_equal_probability_intervals( ...
+    QVe_intervals, ...
+    N_QR_candidates);
 
-                            %% Fixed initial condition
 
-                            dx_0 = ICs(i,:).';
+[R_random,R_interval_index] = ...
+    sample_equal_probability_intervals( ...
+    R_intervals, ...
+    N_QR_candidates);
 
-                            x_0 = [
-                                dx_0(1);
-                                dx_0(2);
-                                phi_p_0 + dx_0(3);
-                                T_0     + dx_0(4);
-                                V_e_0   + dx_0(5)
-                            ];
 
-                            %% Observer initialized at nominal equilibrium
+%% ==========================================================
+% Q/R Sampling-Balance Check
+%% ==========================================================
 
-                            xhat_0 = zeros(5,1);
+expected_count = ...
+    N_QR_candidates / 3;
 
-                            z_0 = [x_0; xhat_0];
+fprintf('\n');
+fprintf('=========================================================\n');
+fprintf('Q/R SAMPLING-BALANCE CHECK\n');
+fprintf('=========================================================\n');
 
-                            %% Nonlinear LQG dynamics
+fprintf('\nExpected samples per interval: %.2f\n', ...
+    expected_count);
 
-                            f_lqg = @(t,z) ...
-                                lqg_nonlinear_dynamics( ...
-                                t,z,A,B,C,L_nominal,K_test,...
-                                M,C_v,K_v,...
-                                phi_p_0,T_0,V_e_0,...
-                                alpha_B,alpha_E,...
-                                gamma_Phi,k_Phi,k_E,...
-                                C_th,h,tau_e,V_max);
 
-                            [t,z] = ode45( ...
-                                f_lqg, ...
-                                tspan, ...
-                                z_0);
+%% ----------------------------------------------------------
+% Q_q Balance
+%% ----------------------------------------------------------
 
-                            %% Extract states
+Qq_counts = ...
+    accumarray( ...
+    Qq_interval_index, ...
+    1, ...
+    [size(Qq_intervals,1),1]);
 
-                            x = z(:,1:5);
-                            x_hat = z(:,6:10);
+fprintf('\nQ_q interval counts:\n');
 
-                            q = x(:,1);
-                            q_dot = x(:,2);
+for interval_index = 1:size(Qq_intervals,1)
 
-                            %% --------------------------------------------------
-                            % Reconstruct physical control input
-                            % --------------------------------------------------
+    fprintf( ...
+        '  Interval %d [%g, %g]: %4d samples (%.1f %%)\n', ...
+        interval_index, ...
+        Qq_intervals(interval_index,1), ...
+        Qq_intervals(interval_index,2), ...
+        Qq_counts(interval_index), ...
+        100*Qq_counts(interval_index)/N_QR_candidates);
 
-                            u_cmd = -x_hat*K_test.';
+end
 
-                            u = max( ...
-                                min(u_cmd,V_max), ...
-                                -V_max);
 
-                            %% --------------------------------------------------
-                            % Performance metrics
-                            % --------------------------------------------------
+%% ----------------------------------------------------------
+% Q_qdot Balance
+%% ----------------------------------------------------------
 
-                            RMS_i(i) = sqrt(mean(q.^2));
+Qqd_counts = ...
+    accumarray( ...
+    Qqd_interval_index, ...
+    1, ...
+    [size(Qqd_intervals,1),1]);
 
-                            energy_i(i) = ...
-                                trapz(t,u.^2);
+fprintf('\nQ_qdot interval counts:\n');
 
-                            % Physical actuator voltage
-                            maxVoltage_i(i) = ...
-                                max(abs(u));
+for interval_index = 1:size(Qqd_intervals,1)
 
-                            %% --------------------------------------------------
-                            % Saturation
-                            % --------------------------------------------------
+    fprintf( ...
+        '  Interval %d [%g, %g]: %4d samples (%.1f %%)\n', ...
+        interval_index, ...
+        Qqd_intervals(interval_index,1), ...
+        Qqd_intervals(interval_index,2), ...
+        Qqd_counts(interval_index), ...
+        100*Qqd_counts(interval_index)/N_QR_candidates);
 
-                            saturated = ...
-                                abs(u) >= V_max - 1e-10;
+end
 
-                            saturated_i(i) = ...
-                                any(saturated);
 
-                            saturationDuration_i(i) = ...
-                                100 * ...
-                                trapz( ...
-                                t, ...
-                                double(saturated)) / Tsim;
+%% ----------------------------------------------------------
+% Q_Phi Balance
+%% ----------------------------------------------------------
 
-                            %% --------------------------------------------------
-                            % Convergence
-                            % --------------------------------------------------
+Qphi_counts = ...
+    accumarray( ...
+    Qphi_interval_index, ...
+    1, ...
+    [size(Qphi_intervals,1),1]);
 
-                            converged_i(i) = ...
-                                abs(q(end)) < eps_q && ...
-                                abs(q_dot(end)) < eps_q_dot;
+fprintf('\nQ_Phi interval counts:\n');
 
-                            %% --------------------------------------------------
-                            % Settling time
-                            % --------------------------------------------------
+for interval_index = 1:size(Qphi_intervals,1)
 
-                            err_norm = ...
-                                sqrt(q.^2 + q_dot.^2);
+    fprintf( ...
+        '  Interval %d [%g, %g]: %4d samples (%.1f %%)\n', ...
+        interval_index, ...
+        Qphi_intervals(interval_index,1), ...
+        Qphi_intervals(interval_index,2), ...
+        Qphi_counts(interval_index), ...
+        100*Qphi_counts(interval_index)/N_QR_candidates);
 
-                            idx_settle = ...
-                                find( ...
-                                err_norm < settle_tol, ...
-                                1, ...
-                                'first');
+end
 
-                            if isempty(idx_settle)
 
-                                settle_i(i) = Tsim;
+%% ----------------------------------------------------------
+% Q_T Balance
+%% ----------------------------------------------------------
+
+QT_counts = ...
+    accumarray( ...
+    QT_interval_index, ...
+    1, ...
+    [size(QT_intervals,1),1]);
 
-                            else
+fprintf('\nQ_T interval counts:\n');
+
+for interval_index = 1:size(QT_intervals,1)
+
+    fprintf( ...
+        '  Interval %d [%g, %g]: %4d samples (%.1f %%)\n', ...
+        interval_index, ...
+        QT_intervals(interval_index,1), ...
+        QT_intervals(interval_index,2), ...
+        QT_counts(interval_index), ...
+        100*QT_counts(interval_index)/N_QR_candidates);
 
-                                remaining_err = ...
-                                    err_norm(idx_settle:end);
+end
+
 
-                                if all(remaining_err < settle_tol)
+%% ----------------------------------------------------------
+% Q_Ve Balance
+%% ----------------------------------------------------------
 
-                                    settle_i(i) = ...
-                                        t(idx_settle);
+QVe_counts = ...
+    accumarray( ...
+    QVe_interval_index, ...
+    1, ...
+    [size(QVe_intervals,1),1]);
 
-                                else
+fprintf('\nQ_Ve interval counts:\n');
 
-                                    settle_i(i) = Tsim;
+for interval_index = 1:size(QVe_intervals,1)
+
+    fprintf( ...
+        '  Interval %d [%g, %g]: %4d samples (%.1f %%)\n', ...
+        interval_index, ...
+        QVe_intervals(interval_index,1), ...
+        QVe_intervals(interval_index,2), ...
+        QVe_counts(interval_index), ...
+        100*QVe_counts(interval_index)/N_QR_candidates);
 
-                                end
+end
 
-                            end
 
-                        end
+%% ----------------------------------------------------------
+% R Balance
+%% ----------------------------------------------------------
 
-                        %% ==================================================
-                        % Candidate summary
-                        % ==================================================
+R_counts = ...
+    accumarray( ...
+    R_interval_index, ...
+    1, ...
+    [size(R_intervals,1),1]);
 
-                        sweep_Q(candidate,:) = ...
-                            diag(Q_test).';
+fprintf('\nR interval counts:\n');
 
-                        sweep_R(candidate) = ...
-                            R_test;
+for interval_index = 1:size(R_intervals,1)
 
-                        sweep_K(candidate,:) = ...
-                            K_test;
+    fprintf( ...
+        '  Interval %d [%g, %g]: %4d samples (%.1f %%)\n', ...
+        interval_index, ...
+        R_intervals(interval_index,1), ...
+        R_intervals(interval_index,2), ...
+        R_counts(interval_index), ...
+        100*R_counts(interval_index)/N_QR_candidates);
 
-                        sweep_success(candidate) = ...
-                            100*mean(converged_i);
+end
 
-                        sweep_RMS(candidate) = ...
-                            mean(RMS_i);
 
-                        sweep_energy(candidate) = ...
-                            mean(energy_i);
+%% ==========================================================
+% Q/R Candidate Table
+%% ==========================================================
 
-                        sweep_settle(candidate) = ...
-                            mean(settle_i);
+QR_candidate_table = table( ...
+    (1:N_QR_candidates).', ...
+    Qq_interval_index, ...
+    Qq_random, ...
+    Qqd_interval_index, ...
+    Qqd_random, ...
+    Qphi_interval_index, ...
+    Qphi_random, ...
+    QT_interval_index, ...
+    QT_random, ...
+    QVe_interval_index, ...
+    QVe_random, ...
+    R_interval_index, ...
+    R_random, ...
+    'VariableNames',{ ...
+    'Candidate', ...
+    'Q_q_Interval', ...
+    'Q_q', ...
+    'Q_qdot_Interval', ...
+    'Q_qdot', ...
+    'Q_Phi_Interval', ...
+    'Q_Phi', ...
+    'Q_T_Interval', ...
+    'Q_T', ...
+    'Q_Ve_Interval', ...
+    'Q_Ve', ...
+    'R_Interval', ...
+    'R'});
 
-                        sweep_maxVoltage(candidate) = ...
-                            mean(maxVoltage_i);
 
-                        sweep_saturation(candidate) = ...
-                            100*mean(saturated_i);
+fprintf('\n');
+fprintf('=========================================================\n');
+fprintf('STRATIFIED Q/R CANDIDATES\n');
+fprintf('=========================================================\n');
 
-                        sweep_satDuration(candidate) = ...
-                            mean(saturationDuration_i);
+disp(QR_candidate_table);
 
-                        %% --------------------------------------------------
-                        % Progress
-                        % --------------------------------------------------
+fprintf( ...
+    'LQR Q/R candidates: %d\n', ...
+    N_QR_candidates);
 
-                        fprintf( ...
-                            'K candidate %4d/%4d | ', ...
-                            candidate,N_K_candidates);
+fprintf( ...
+    'Initial conditions per candidate: %d\n', ...
+    N_IC);
 
-                        fprintf( ...
-                            'Q = [%.2g %.2g %.2g %.2g %.2g] ', ...
-                            diag(Q_test));
+fprintf( ...
+    'Stage 1 nonlinear simulations: %d\n', ...
+    N_QR_candidates*N_IC);
 
-                        fprintf( ...
-                            '| R = %.2g | Success = %.1f %% | RMS = %.4g\n', ...
-                            R_test,...
-                            sweep_success(candidate),...
-                            sweep_RMS(candidate));
 
-                    end
+%% ==========================================================
+% Stage 1 Result Storage
+%% ==========================================================
 
-                end
+lqr_success     = zeros(N_QR_candidates,1);
+lqr_RMS         = zeros(N_QR_candidates,1);
+lqr_energy      = zeros(N_QR_candidates,1);
+lqr_settle      = zeros(N_QR_candidates,1);
+lqr_maxVoltage  = zeros(N_QR_candidates,1);
+lqr_saturation  = zeros(N_QR_candidates,1);
+lqr_satDuration = zeros(N_QR_candidates,1);
+
+lqr_K = zeros(N_QR_candidates,5);
+
+
+%% ==========================================================
+% STAGE 1 LQR Q/R SWEEP
+%% ==========================================================
+
+fprintf('\n');
+fprintf('=========================================================\n');
+fprintf('BEGINNING STAGE 1 LQR SWEEP\n');
+fprintf('=========================================================\n');
+
+tic;
+
+
+for candidate = 1:N_QR_candidates
+
+    %% ------------------------------------------------------
+    % Construct Candidate Q and R
+    %% ------------------------------------------------------
+
+    Q_test = diag([ ...
+        Qq_random(candidate), ...
+        Qqd_random(candidate), ...
+        Qphi_random(candidate), ...
+        QT_random(candidate), ...
+        QVe_random(candidate)]);
+
+    R_test = R_random(candidate);
+
+
+    %% ------------------------------------------------------
+    % Compute LQR Gain
+    %% ------------------------------------------------------
+
+    try
+
+        K_test = lqr( ...
+            A, ...
+            B, ...
+            Q_test, ...
+            R_test);
+
+    catch ME
+
+        warning( ...
+            'LQR failed for candidate %d: %s', ...
+            candidate, ...
+            ME.message);
+
+        lqr_success(candidate)     = NaN;
+        lqr_RMS(candidate)         = NaN;
+        lqr_energy(candidate)      = NaN;
+        lqr_settle(candidate)      = NaN;
+        lqr_maxVoltage(candidate)  = NaN;
+        lqr_saturation(candidate)  = NaN;
+        lqr_satDuration(candidate) = NaN;
+
+        continue;
+
+    end
+
+
+    %% ------------------------------------------------------
+    % Store LQR Gain
+    %% ------------------------------------------------------
+
+    lqr_K(candidate,:) = K_test;
+
+
+    %% ======================================================
+    % Monte Carlo Metric Storage
+    %% ======================================================
+
+    RMS_i = zeros(N_IC,1);
+
+    energy_i = zeros(N_IC,1);
+
+    settle_i = zeros(N_IC,1);
+
+    maxVoltage_i = zeros(N_IC,1);
+
+    saturated_i = false(N_IC,1);
+
+    saturationDuration_i = ...
+        zeros(N_IC,1);
+
+    converged_i = ...
+        false(N_IC,1);
+
+
+    %% ======================================================
+    % Monte Carlo Simulations
+    %% ======================================================
+
+    for i = 1:N_IC
+
+        %% --------------------------------------------------
+        % Fixed Initial Condition
+        %% --------------------------------------------------
+
+        dx_0 = ICs(i,:).';
+
+        x_0 = [ ...
+            dx_0(1);
+            dx_0(2);
+            phi_p_0 + dx_0(3);
+            T_0     + dx_0(4);
+            V_e_0   + dx_0(5)];
+
+
+        %% --------------------------------------------------
+        % Nonlinear LQR Dynamics
+        %% --------------------------------------------------
+
+        f_lqr = @(t,x) ...
+            lqr_nonlinear_dynamics( ...
+            t,x,K_test, ...
+            M,C_v,K_v, ...
+            phi_p_0,T_0,V_e_0, ...
+            alpha_B,alpha_E, ...
+            gamma_Phi,k_Phi,k_E, ...
+            C_th,h,tau_e,V_max);
+
+
+        [t,x] = ode45( ...
+            f_lqr, ...
+            tspan, ...
+            x_0);
+
+
+        %% --------------------------------------------------
+        % Extract States
+        %% --------------------------------------------------
+
+        q = x(:,1);
+
+        q_dot = x(:,2);
+
+
+        %% --------------------------------------------------
+        % Reconstruct Physical Control
+        %% --------------------------------------------------
+
+        x_pert = x;
+
+        x_pert(:,3) = ...
+            x(:,3) - phi_p_0;
+
+        x_pert(:,4) = ...
+            x(:,4) - T_0;
+
+        x_pert(:,5) = ...
+            x(:,5) - V_e_0;
+
+        u_cmd = ...
+            -x_pert*K_test.';
+
+        u = max( ...
+            min(u_cmd,V_max), ...
+            -V_max);
+
+
+        %% --------------------------------------------------
+        % Performance Metrics
+        %% --------------------------------------------------
+
+        RMS_i(i) = ...
+            sqrt(mean(q.^2));
+
+        energy_i(i) = ...
+            trapz(t,u.^2);
+
+        maxVoltage_i(i) = ...
+            max(abs(u));
+
+
+        %% --------------------------------------------------
+        % Saturation
+        %% --------------------------------------------------
+
+        saturated = ...
+            abs(u) >= V_max - 1e-10;
+
+        saturated_i(i) = ...
+            any(saturated);
+
+        saturationDuration_i(i) = ...
+            100* ...
+            trapz( ...
+                t, ...
+                double(saturated)) / Tsim;
+
+
+        %% --------------------------------------------------
+        % Convergence
+        %% --------------------------------------------------
+
+        converged_i(i) = ...
+            abs(q(end)) < eps_q && ...
+            abs(q_dot(end)) < eps_q_dot;
+
+
+        %% --------------------------------------------------
+        % Settling Time
+        %% --------------------------------------------------
+
+        err_norm = ...
+            sqrt(q.^2 + q_dot.^2);
+
+        idx_settle = ...
+            find( ...
+                err_norm < settle_tol, ...
+                1, ...
+                'first');
+
+
+        if isempty(idx_settle)
+
+            settle_i(i) = Tsim;
+
+        else
+
+            remaining_err = ...
+                err_norm(idx_settle:end);
+
+            if all(remaining_err < settle_tol)
+
+                settle_i(i) = ...
+                    t(idx_settle);
+
+            else
+
+                settle_i(i) = Tsim;
 
             end
 
@@ -419,46 +925,110 @@ for iq = 1:length(Qq_values)
 
     end
 
+
+    %% ======================================================
+    % Candidate Summary
+    %% ======================================================
+
+    lqr_success(candidate) = ...
+        100*mean(converged_i);
+
+    lqr_RMS(candidate) = ...
+        mean(RMS_i);
+
+    lqr_energy(candidate) = ...
+        mean(energy_i);
+
+    lqr_settle(candidate) = ...
+        mean(settle_i);
+
+    lqr_maxVoltage(candidate) = ...
+        mean(maxVoltage_i);
+
+    lqr_saturation(candidate) = ...
+        100*mean(saturated_i);
+
+    lqr_satDuration(candidate) = ...
+        mean(saturationDuration_i);
+
+
+    %% ------------------------------------------------------
+    % Progress
+    %% ------------------------------------------------------
+
+    fprintf( ...
+        'LQR candidate %4d/%4d | ', ...
+        candidate, ...
+        N_QR_candidates);
+
+    fprintf( ...
+        'Success = %.1f %% | ', ...
+        lqr_success(candidate));
+
+    fprintf( ...
+        'RMS = %.4g | ', ...
+        lqr_RMS(candidate));
+
+    fprintf( ...
+        'Energy = %.4g\n', ...
+        lqr_energy(candidate));
+
 end
 
+
+elapsed_stage1 = toc;
+
+
+fprintf('\n');
+fprintf( ...
+    'Stage 1 completed in %.2f minutes.\n', ...
+    elapsed_stage1/60);
+
+
 %% ==========================================================
-% Stage 1 Results
-% ==========================================================
-
-Qq_result   = sweep_Q(:,1);
-Qqd_result  = sweep_Q(:,2);
-Qphi_result = sweep_Q(:,3);
-QT_result   = sweep_Q(:,4);
-QVe_result  = sweep_Q(:,5);
-
-K1 = sweep_K(:,1);
-K2 = sweep_K(:,2);
-K3 = sweep_K(:,3);
-K4 = sweep_K(:,4);
-K5 = sweep_K(:,5);
+% Stage 1 LQR Results Table
+%% ==========================================================
 
 K_results_table = table( ...
-    Qq_result, ...
-    Qqd_result, ...
-    Qphi_result, ...
-    QT_result, ...
-    QVe_result, ...
-    sweep_R, ...
-    K1, K2, K3, K4, K5, ...
-    sweep_success, ...
-    sweep_RMS, ...
-    sweep_settle, ...
-    sweep_energy, ...
-    sweep_maxVoltage, ...
-    sweep_saturation, ...
-    sweep_satDuration, ...
+    (1:N_QR_candidates).', ...
+    Qq_random, ...
+    Qqd_random, ...
+    Qphi_random, ...
+    QT_random, ...
+    QVe_random, ...
+    R_random, ...
+    Qq_interval_index, ...
+    Qqd_interval_index, ...
+    Qphi_interval_index, ...
+    QT_interval_index, ...
+    QVe_interval_index, ...
+    R_interval_index, ...
+    lqr_K(:,1), ...
+    lqr_K(:,2), ...
+    lqr_K(:,3), ...
+    lqr_K(:,4), ...
+    lqr_K(:,5), ...
+    lqr_success, ...
+    lqr_RMS, ...
+    lqr_settle, ...
+    lqr_energy, ...
+    lqr_maxVoltage, ...
+    lqr_saturation, ...
+    lqr_satDuration, ...
     'VariableNames',{ ...
+    'Candidate', ...
     'Q_q', ...
     'Q_qdot', ...
     'Q_Phi', ...
     'Q_T', ...
     'Q_Ve', ...
     'R', ...
+    'Q_q_Interval', ...
+    'Q_qdot_Interval', ...
+    'Q_Phi_Interval', ...
+    'Q_T_Interval', ...
+    'Q_Ve_Interval', ...
+    'R_Interval', ...
     'K_q', ...
     'K_qdot', ...
     'K_Phi', ...
@@ -472,14 +1042,33 @@ K_results_table = table( ...
     'SaturationIncidence', ...
     'MeanSaturationDuration'});
 
-%% ----------------------------------------------------------
-% Sort Stage 1 results
-% ----------------------------------------------------------
+
+%% ==========================================================
+% Remove Failed LQR Candidates
+%% ==========================================================
+
+valid_LQR = ...
+    isfinite(K_results_table.SuccessRate);
+
+K_results_table = ...
+    K_results_table(valid_LQR,:);
+
+
+%% ==========================================================
+% Sort LQR Results
+%% ==========================================================
 
 K_results_table = sortrows( ...
     K_results_table, ...
-    {'SuccessRate','MeanRMS','MeanEnergy'}, ...
-    {'descend','ascend','ascend'});
+    {'SuccessRate', ...
+     'MeanRMS', ...
+     'MeanEnergy', ...
+     'SaturationIncidence'}, ...
+    {'descend', ...
+     'ascend', ...
+     'ascend', ...
+     'ascend'});
+
 
 fprintf('\n');
 fprintf('=========================================================\n');
@@ -489,109 +1078,284 @@ fprintf('=========================================================\n');
 disp(K_results_table( ...
     1:min(20,height(K_results_table)),:));
 
-%% ==========================================================
-% Select Top LQR Controllers for LQE Sweep
-% ==========================================================
-%
-% Rather than performing a prohibitively large joint sweep of
-% every Q/R/W/V combination, retain the strongest LQR
-% controllers and optimize the observer around them.
-%
-
-N_top_K = min(10,height(K_results_table));
-
-top_K_table = K_results_table(1:N_top_K,:);
-
-fprintf('\n');
-fprintf('Retaining top %d LQR controllers for LQE sweep.\n', ...
-    N_top_K);
 
 %% ==========================================================
-% STAGE 2: LQE W/V Observer Sweep
-% ==========================================================
+% Retain Top LQR Controllers for Stage 2
+%% ==========================================================
+
+N_top_K = ...
+    min(N_top_K_requested,height(K_results_table));
+
+top_K_table = ...
+    K_results_table(1:N_top_K,:);
+
 
 fprintf('\n');
 fprintf('=========================================================\n');
-fprintf('STAGE 2: LQE W/V Observer Sweep\n');
+fprintf('LQR CONTROLLERS RETAINED FOR STAGE 2\n');
 fprintf('=========================================================\n');
 
-%% ----------------------------------------------------------
-% Process-noise covariance scaling
-% ----------------------------------------------------------
-%
-% W = W_nominal * W_scale
-%
-% Larger W_scale tells the Kalman filter that the plant model
-% is less trustworthy and that process disturbances are larger.
-%
-
-W_scale_values = [0.1 1 10];
-
-%% ----------------------------------------------------------
-% Measurement-noise covariance scaling
-% ----------------------------------------------------------
-%
-% V = V_nominal * V_scale
-%
-% Larger V_scale tells the Kalman filter that measurements
-% are noisier and should therefore be trusted less.
-%
-
-V_scale_values = [0.1 1 10];
-
-%% ----------------------------------------------------------
-% Number of observer candidates
-% ----------------------------------------------------------
-
-N_L_candidates = ...
-    length(W_scale_values) * ...
-    length(V_scale_values);
-
-fprintf('LQE W/V candidates per controller: %d\n', ...
-    N_L_candidates);
-
-fprintf('Top LQR controllers evaluated: %d\n', ...
+fprintf( ...
+    'Top LQR controllers retained: %d\n', ...
     N_top_K);
 
-fprintf('Initial conditions per LQG candidate: %d\n', ...
+disp(top_K_table);
+
+
+%% ==========================================================
+% STAGE 2: Stratified-by-Scale Random LQE W/V Sweep
+%% ==========================================================
+
+fprintf('\n');
+fprintf('=========================================================\n');
+fprintf('STAGE 2: STRATIFIED-BY-SCALE RANDOM LQE W/V SWEEP\n');
+fprintf('=========================================================\n');
+
+
+%% ----------------------------------------------------------
+% Number of Random W/V Candidates
+%% ----------------------------------------------------------
+
+N_WV_candidates = 1000;
+
+
+%% ==========================================================
+% Equal-Probability W/V Scale Intervals
+%% ==========================================================
+%
+% Every W candidate independently selects one interval with
+% probability 1/3 and samples uniformly within that interval.
+%
+% The same is done independently for V.
+%
+% ==========================================================
+
+W_scale_intervals = [ ...
+    0.01  0.10;
+    0.10  1.00;
+    1.00 10.00];
+
+
+V_scale_intervals = [ ...
+    0.01  0.10;
+    0.10  1.00;
+    1.00 10.00];
+
+
+%% ==========================================================
+% Generate Common Random W/V Candidates
+%% ==========================================================
+
+[W_scale_random,W_interval_index] = ...
+    sample_equal_probability_intervals( ...
+    W_scale_intervals, ...
+    N_WV_candidates);
+
+
+[V_scale_random,V_interval_index] = ...
+    sample_equal_probability_intervals( ...
+    V_scale_intervals, ...
+    N_WV_candidates);
+
+
+%% ==========================================================
+% W/V Sampling-Balance Check
+%% ==========================================================
+
+expected_WV_count = ...
+    N_WV_candidates/3;
+
+
+fprintf('\n');
+fprintf('=========================================================\n');
+fprintf('W/V SAMPLING-BALANCE CHECK\n');
+fprintf('=========================================================\n');
+
+fprintf( ...
+    '\nExpected samples per interval: %.2f\n', ...
+    expected_WV_count);
+
+
+%% ----------------------------------------------------------
+% W Balance
+%% ----------------------------------------------------------
+
+W_counts = ...
+    accumarray( ...
+    W_interval_index, ...
+    1, ...
+    [size(W_scale_intervals,1),1]);
+
+
+fprintf('\nW interval counts:\n');
+
+for interval_index = 1:size(W_scale_intervals,1)
+
+    fprintf( ...
+        '  Interval %d [%g, %g]: %4d samples (%.1f %%)\n', ...
+        interval_index, ...
+        W_scale_intervals(interval_index,1), ...
+        W_scale_intervals(interval_index,2), ...
+        W_counts(interval_index), ...
+        100*W_counts(interval_index)/N_WV_candidates);
+
+end
+
+
+%% ----------------------------------------------------------
+% V Balance
+%% ----------------------------------------------------------
+
+V_counts = ...
+    accumarray( ...
+    V_interval_index, ...
+    1, ...
+    [size(V_scale_intervals,1),1]);
+
+
+fprintf('\nV interval counts:\n');
+
+for interval_index = 1:size(V_scale_intervals,1)
+
+    fprintf( ...
+        '  Interval %d [%g, %g]: %4d samples (%.1f %%)\n', ...
+        interval_index, ...
+        V_scale_intervals(interval_index,1), ...
+        V_scale_intervals(interval_index,2), ...
+        V_counts(interval_index), ...
+        100*V_counts(interval_index)/N_WV_candidates);
+
+end
+
+
+%% ==========================================================
+% W/V Candidate Table
+%% ==========================================================
+
+WV_candidate_table = table( ...
+    (1:N_WV_candidates).', ...
+    W_interval_index, ...
+    W_scale_random, ...
+    V_interval_index, ...
+    V_scale_random, ...
+    'VariableNames',{ ...
+    'Candidate', ...
+    'W_Interval', ...
+    'W_Scale', ...
+    'V_Interval', ...
+    'V_Scale'});
+
+
+fprintf('\n');
+fprintf('=========================================================\n');
+fprintf('STRATIFIED W/V OBSERVER CANDIDATES\n');
+fprintf('=========================================================\n');
+
+disp(WV_candidate_table);
+
+fprintf( ...
+    'LQE W/V candidates per controller: %d\n', ...
+    N_WV_candidates);
+
+fprintf( ...
+    'Top LQR controllers evaluated: %d\n', ...
+    N_top_K);
+
+fprintf( ...
+    'Initial conditions per LQG candidate: %d\n', ...
     N_IC);
 
-fprintf('Stage 2 nonlinear simulations: %d\n', ...
-    N_top_K*N_L_candidates*N_IC);
+fprintf( ...
+    'Stage 2 nonlinear simulations: %d\n', ...
+    N_top_K*N_WV_candidates*N_IC);
 
-%% ----------------------------------------------------------
-% Result storage
-% ----------------------------------------------------------
+
+%% ==========================================================
+% Stage 2 Result Storage
+%% ==========================================================
 
 N_LQG_candidates = ...
-    N_top_K * N_L_candidates;
+    N_top_K*N_WV_candidates;
 
-lqg_K_index = zeros(N_LQG_candidates,1);
 
-lqg_W_scale = zeros(N_LQG_candidates,1);
-lqg_V_scale = zeros(N_LQG_candidates,1);
+lqg_K_index = ...
+    zeros(N_LQG_candidates,1);
 
-lqg_success = zeros(N_LQG_candidates,1);
-lqg_RMS = zeros(N_LQG_candidates,1);
-lqg_energy = zeros(N_LQG_candidates,1);
-lqg_settle = zeros(N_LQG_candidates,1);
-lqg_maxVoltage = zeros(N_LQG_candidates,1);
-lqg_saturation = zeros(N_LQG_candidates,1);
-lqg_satDuration = zeros(N_LQG_candidates,1);
 
-lqg_L = zeros(N_LQG_candidates,25);
+lqg_W_scale = ...
+    zeros(N_LQG_candidates,1);
+
+
+lqg_V_scale = ...
+    zeros(N_LQG_candidates,1);
+
+
+lqg_W_interval = ...
+    zeros(N_LQG_candidates,1);
+
+
+lqg_V_interval = ...
+    zeros(N_LQG_candidates,1);
+
+
+lqg_success = ...
+    zeros(N_LQG_candidates,1);
+
+
+lqg_RMS = ...
+    zeros(N_LQG_candidates,1);
+
+
+lqg_energy = ...
+    zeros(N_LQG_candidates,1);
+
+
+lqg_settle = ...
+    zeros(N_LQG_candidates,1);
+
+
+lqg_maxVoltage = ...
+    zeros(N_LQG_candidates,1);
+
+
+lqg_saturation = ...
+    zeros(N_LQG_candidates,1);
+
+
+lqg_satDuration = ...
+    zeros(N_LQG_candidates,1);
+
+
+lqg_L = ...
+    zeros(5,4,N_LQG_candidates);
+
+
+%% ==========================================================
+% STAGE 2 W/V SWEEP
+%% ==========================================================
+%
+% Each retained LQR controller is evaluated using the exact
+% same set of randomly generated W/V observer candidates.
+%
+% ==========================================================
+
+fprintf('\n');
+fprintf('=========================================================\n');
+fprintf('BEGINNING STAGE 2 LQG SWEEP\n');
+fprintf('=========================================================\n');
+
+tic;
+
 
 candidate = 0;
 
-%% ==========================================================
-% Stage 2 W/V Sweep
-% ==========================================================
 
 for k_index = 1:N_top_K
 
+
     %% ------------------------------------------------------
-    % Recover LQR controller
-    % ------------------------------------------------------
+    % Recover LQR Controller
+    %% ------------------------------------------------------
 
     Q_test = diag([ ...
         top_K_table.Q_q(k_index), ...
@@ -600,280 +1364,447 @@ for k_index = 1:N_top_K
         top_K_table.Q_T(k_index), ...
         top_K_table.Q_Ve(k_index)]);
 
-    R_test = top_K_table.R(k_index);
 
-    K_test = lqr(A,B,Q_test,R_test);
+    R_test = ...
+        top_K_table.R(k_index);
 
-    for iW = 1:length(W_scale_values)
 
-        for iV = 1:length(V_scale_values)
+    K_test = lqr( ...
+        A, ...
+        B, ...
+        Q_test, ...
+        R_test);
 
-            candidate = candidate + 1;
 
-            W_scale = W_scale_values(iW);
-            V_scale = V_scale_values(iV);
+    %% ------------------------------------------------------
+    % Evaluate Every Common W/V Candidate
+    %% ------------------------------------------------------
+
+    for wv_index = 1:N_WV_candidates
+
+        candidate = candidate + 1;
+
+
+        W_scale = ...
+            W_scale_random(wv_index);
+
+
+        V_scale = ...
+            V_scale_random(wv_index);
+
+
+        %% --------------------------------------------------
+        % Construct W and V
+        %% --------------------------------------------------
+
+        W_test = ...
+            W_scale*W_nominal;
+
+
+        V_test = ...
+            V_scale*V_nominal;
+
+
+        %% --------------------------------------------------
+        % Compute Kalman Gain
+        %% --------------------------------------------------
+
+        try
+
+            L_test = lqe( ...
+                A, ...
+                eye(5), ...
+                C, ...
+                W_test, ...
+                V_test);
+
+        catch ME
+
+            warning( ...
+                'LQE failed for candidate %d: %s', ...
+                candidate, ...
+                ME.message);
+
+
+            lqg_K_index(candidate) = ...
+                k_index;
+
+
+            lqg_W_scale(candidate) = ...
+                W_scale;
+
+
+            lqg_V_scale(candidate) = ...
+                V_scale;
+
+
+            lqg_W_interval(candidate) = ...
+                W_interval_index(wv_index);
+
+
+            lqg_V_interval(candidate) = ...
+                V_interval_index(wv_index);
+
+
+            lqg_success(candidate) = NaN;
+
+            lqg_RMS(candidate) = NaN;
+
+            lqg_energy(candidate) = NaN;
+
+            lqg_settle(candidate) = NaN;
+
+            lqg_maxVoltage(candidate) = NaN;
+
+            lqg_saturation(candidate) = NaN;
+
+            lqg_satDuration(candidate) = NaN;
+
+
+            continue;
+
+        end
+
+
+        %% ==================================================
+        % Monte Carlo Metric Storage
+        %% ==================================================
+
+        RMS_i = zeros(N_IC,1);
+
+        energy_i = zeros(N_IC,1);
+
+        settle_i = zeros(N_IC,1);
+
+        maxVoltage_i = zeros(N_IC,1);
+
+        saturated_i = false(N_IC,1);
+
+        saturationDuration_i = ...
+            zeros(N_IC,1);
+
+        converged_i = ...
+            false(N_IC,1);
+
+
+        %% ==================================================
+        % Monte Carlo Simulations
+        %% ==================================================
+
+        for i = 1:N_IC
+
 
             %% --------------------------------------------------
-            % Construct W and V
-            % --------------------------------------------------
+            % Fixed Initial Condition
+            %% --------------------------------------------------
 
-            W_test = W_scale * W_nominal;
-            V_test = V_scale * V_nominal;
+            dx_0 = ICs(i,:).';
+
+
+            x_0 = [ ...
+                dx_0(1);
+                dx_0(2);
+                phi_p_0 + dx_0(3);
+                T_0     + dx_0(4);
+                V_e_0   + dx_0(5)];
+
 
             %% --------------------------------------------------
-            % Compute Kalman gain
-            % --------------------------------------------------
+            % Observer Initial Condition
+            %% --------------------------------------------------
 
-            try
+            xhat_0 = zeros(5,1);
 
-                L_test = lqe( ...
-                    A, ...
-                    eye(5), ...
-                    C, ...
-                    W_test, ...
-                    V_test);
 
-            catch
+            z_0 = [ ...
+                x_0;
+                xhat_0];
 
-                warning( ...
-                    'LQE failed for candidate %d.', ...
-                    candidate);
-
-                continue;
-
-            end
 
             %% --------------------------------------------------
-            % Candidate metric storage
-            % --------------------------------------------------
+            % Nonlinear LQG Dynamics
+            %% --------------------------------------------------
 
-            RMS_i = zeros(N_IC,1);
-            energy_i = zeros(N_IC,1);
-            settle_i = zeros(N_IC,1);
-            maxVoltage_i = zeros(N_IC,1);
+            f_lqg = @(t,z) ...
+                lqg_nonlinear_dynamics( ...
+                t,z,A,B,C,L_test,K_test, ...
+                M,C_v,K_v, ...
+                phi_p_0,T_0,V_e_0, ...
+                alpha_B,alpha_E, ...
+                gamma_Phi,k_Phi,k_E, ...
+                C_th,h,tau_e,V_max);
 
-            saturated_i = false(N_IC,1);
-            saturationDuration_i = zeros(N_IC,1);
-            converged_i = false(N_IC,1);
 
-            %% ==================================================
-            % Monte Carlo simulations
-            % ==================================================
+            [t,z] = ode45( ...
+                f_lqg, ...
+                tspan, ...
+                z_0);
 
-            for i = 1:N_IC
 
-                %% Fixed initial condition
+            %% --------------------------------------------------
+            % Extract Plant States
+            %% --------------------------------------------------
 
-                dx_0 = ICs(i,:).';
+            x = z(:,1:5);
 
-                x_0 = [
-                    dx_0(1);
-                    dx_0(2);
-                    phi_p_0 + dx_0(3);
-                    T_0     + dx_0(4);
-                    V_e_0   + dx_0(5)
-                ];
 
-                %% Observer initialized at nominal equilibrium
+            q = x(:,1);
 
-                xhat_0 = zeros(5,1);
+            q_dot = x(:,2);
 
-                z_0 = [x_0; xhat_0];
 
-                %% Nonlinear LQG dynamics
+            %% --------------------------------------------------
+            % Reconstruct Physical Control
+            %% --------------------------------------------------
 
-                f_lqg = @(t,z) ...
-                    lqg_nonlinear_dynamics( ...
-                    t,z,A,B,C,L_test,K_test,...
-                    M,C_v,K_v,...
-                    phi_p_0,T_0,V_e_0,...
-                    alpha_B,alpha_E,...
-                    gamma_Phi,k_Phi,k_E,...
-                    C_th,h,tau_e,V_max);
+            x_hat = ...
+                z(:,6:10);
 
-                [t,z] = ode45( ...
-                    f_lqg, ...
-                    tspan, ...
-                    z_0);
 
-                %% Extract states
+            u_cmd = ...
+                -x_hat*K_test.';
 
-                x = z(:,1:5);
-                x_hat = z(:,6:10);
 
-                q = x(:,1);
-                q_dot = x(:,2);
+            u = max( ...
+                min(u_cmd,V_max), ...
+                -V_max);
 
-                %% --------------------------------------------------
-                % Reconstruct control
-                % --------------------------------------------------
 
-                u_cmd = -x_hat*K_test.';
+            %% --------------------------------------------------
+            % Performance Metrics
+            %% --------------------------------------------------
 
-                u = max( ...
-                    min(u_cmd,V_max), ...
-                    -V_max);
+            RMS_i(i) = ...
+                sqrt(mean(q.^2));
 
-                %% --------------------------------------------------
-                % Performance metrics
-                % --------------------------------------------------
 
-                RMS_i(i) = ...
-                    sqrt(mean(q.^2));
+            energy_i(i) = ...
+                trapz(t,u.^2);
 
-                energy_i(i) = ...
-                    trapz(t,u.^2);
 
-                maxVoltage_i(i) = ...
-                    max(abs(u));
+            maxVoltage_i(i) = ...
+                max(abs(u));
 
-                %% --------------------------------------------------
-                % Saturation
-                % --------------------------------------------------
 
-                saturated = ...
-                    abs(u) >= V_max - 1e-10;
+            %% --------------------------------------------------
+            % Saturation
+            %% --------------------------------------------------
 
-                saturated_i(i) = ...
-                    any(saturated);
+            saturated = ...
+                abs(u) >= V_max - 1e-10;
 
-                saturationDuration_i(i) = ...
-                    100 * ...
-                    trapz( ...
-                    t, ...
-                    double(saturated))/Tsim;
 
-                %% --------------------------------------------------
-                % Convergence
-                % --------------------------------------------------
+            saturated_i(i) = ...
+                any(saturated);
 
-                converged_i(i) = ...
-                    abs(q(end)) < eps_q && ...
-                    abs(q_dot(end)) < eps_q_dot;
 
-                %% --------------------------------------------------
-                % Settling time
-                % --------------------------------------------------
+            saturationDuration_i(i) = ...
+                100* ...
+                trapz( ...
+                t, ...
+                double(saturated)) / Tsim;
 
-                err_norm = ...
-                    sqrt(q.^2 + q_dot.^2);
 
-                idx_settle = ...
-                    find( ...
-                    err_norm < settle_tol, ...
-                    1, ...
-                    'first');
+            %% --------------------------------------------------
+            % Convergence
+            %% --------------------------------------------------
 
-                if isempty(idx_settle)
+            converged_i(i) = ...
+                abs(q(end)) < eps_q && ...
+                abs(q_dot(end)) < eps_q_dot;
 
-                    settle_i(i) = Tsim;
+
+            %% --------------------------------------------------
+            % Settling Time
+            %% --------------------------------------------------
+
+            err_norm = ...
+                sqrt(q.^2 + q_dot.^2);
+
+
+            idx_settle = ...
+                find( ...
+                err_norm < settle_tol, ...
+                1, ...
+                'first');
+
+
+            if isempty(idx_settle)
+
+                settle_i(i) = Tsim;
+
+            else
+
+                remaining_err = ...
+                    err_norm(idx_settle:end);
+
+
+                if all(remaining_err < settle_tol)
+
+                    settle_i(i) = ...
+                        t(idx_settle);
 
                 else
 
-                    remaining_err = ...
-                        err_norm(idx_settle:end);
-
-                    if all(remaining_err < settle_tol)
-
-                        settle_i(i) = ...
-                            t(idx_settle);
-
-                    else
-
-                        settle_i(i) = Tsim;
-
-                    end
+                    settle_i(i) = Tsim;
 
                 end
 
             end
 
-            %% ==================================================
-            % Candidate summary
-            % ==================================================
-
-            lqg_K_index(candidate) = k_index;
-
-            lqg_W_scale(candidate) = W_scale;
-
-            lqg_V_scale(candidate) = V_scale;
-
-            lqg_L(candidate,:) = ...
-                L_test(:).';
-
-            lqg_success(candidate) = ...
-                100*mean(converged_i);
-
-            lqg_RMS(candidate) = ...
-                mean(RMS_i);
-
-            lqg_energy(candidate) = ...
-                mean(energy_i);
-
-            lqg_settle(candidate) = ...
-                mean(settle_i);
-
-            lqg_maxVoltage(candidate) = ...
-                mean(maxVoltage_i);
-
-            lqg_saturation(candidate) = ...
-                100*mean(saturated_i);
-
-            lqg_satDuration(candidate) = ...
-                mean(saturationDuration_i);
-
-            %% --------------------------------------------------
-            % Progress
-            % --------------------------------------------------
-
-            fprintf( ...
-                'LQG candidate %3d/%3d | K #%2d | ', ...
-                candidate, ...
-                N_LQG_candidates, ...
-                k_index);
-
-            fprintf( ...
-                'W = %.2g | V = %.2g | ', ...
-                W_scale,V_scale);
-
-            fprintf( ...
-                'Success = %.1f %% | RMS = %.4g\n', ...
-                lqg_success(candidate), ...
-                lqg_RMS(candidate));
-
         end
+
+
+        %% ==================================================
+        % Candidate Summary
+        %% ==================================================
+
+        lqg_K_index(candidate) = ...
+            k_index;
+
+
+        lqg_W_scale(candidate) = ...
+            W_scale;
+
+
+        lqg_V_scale(candidate) = ...
+            V_scale;
+
+
+        lqg_W_interval(candidate) = ...
+            W_interval_index(wv_index);
+
+
+        lqg_V_interval(candidate) = ...
+            V_interval_index(wv_index);
+
+
+        lqg_L(:,:,candidate) = ...
+            L_test;
+
+
+        lqg_success(candidate) = ...
+            100*mean(converged_i);
+
+
+        lqg_RMS(candidate) = ...
+            mean(RMS_i);
+
+
+        lqg_energy(candidate) = ...
+            mean(energy_i);
+
+
+        lqg_settle(candidate) = ...
+            mean(settle_i);
+
+
+        lqg_maxVoltage(candidate) = ...
+            mean(maxVoltage_i);
+
+
+        lqg_saturation(candidate) = ...
+            100*mean(saturated_i);
+
+
+        lqg_satDuration(candidate) = ...
+            mean(saturationDuration_i);
+
+
+        %% --------------------------------------------------
+        % Progress
+        %% --------------------------------------------------
+
+        fprintf( ...
+            'LQG candidate %4d/%4d | K #%2d | ', ...
+            candidate, ...
+            N_LQG_candidates, ...
+            k_index);
+
+
+        fprintf( ...
+            'W = %.4g | V = %.4g | ', ...
+            W_scale, ...
+            V_scale);
+
+
+        fprintf( ...
+            'Success = %.1f %% | RMS = %.4g\n', ...
+            lqg_success(candidate), ...
+            lqg_RMS(candidate));
 
     end
 
 end
 
+
+elapsed_stage2 = toc;
+
+
+fprintf('\n');
+fprintf( ...
+    'Stage 2 completed in %.2f minutes.\n', ...
+    elapsed_stage2/60);
+
+
 %% ==========================================================
 % Stage 2 LQG Results Table
-% ==========================================================
+%% ==========================================================
 
-Qq_result = zeros(N_LQG_candidates,1);
-Qqd_result = zeros(N_LQG_candidates,1);
-Qphi_result = zeros(N_LQG_candidates,1);
-QT_result = zeros(N_LQG_candidates,1);
-QVe_result = zeros(N_LQG_candidates,1);
-R_result = zeros(N_LQG_candidates,1);
+Qq_result = ...
+    zeros(N_LQG_candidates,1);
+
+Qqd_result = ...
+    zeros(N_LQG_candidates,1);
+
+Qphi_result = ...
+    zeros(N_LQG_candidates,1);
+
+QT_result = ...
+    zeros(N_LQG_candidates,1);
+
+QVe_result = ...
+    zeros(N_LQG_candidates,1);
+
+R_result = ...
+    zeros(N_LQG_candidates,1);
+
 
 for i = 1:N_LQG_candidates
 
-    k_index = lqg_K_index(i);
+    k_index_i = ...
+        lqg_K_index(i);
 
-    Qq_result(i) = top_K_table.Q_q(k_index);
-    Qqd_result(i) = top_K_table.Q_qdot(k_index);
-    Qphi_result(i) = top_K_table.Q_Phi(k_index);
-    QT_result(i) = top_K_table.Q_T(k_index);
-    QVe_result(i) = top_K_table.Q_Ve(k_index);
-    R_result(i) = top_K_table.R(k_index);
+
+    Qq_result(i) = ...
+        top_K_table.Q_q(k_index_i);
+
+
+    Qqd_result(i) = ...
+        top_K_table.Q_qdot(k_index_i);
+
+
+    Qphi_result(i) = ...
+        top_K_table.Q_Phi(k_index_i);
+
+
+    QT_result(i) = ...
+        top_K_table.Q_T(k_index_i);
+
+
+    QVe_result(i) = ...
+        top_K_table.Q_Ve(k_index_i);
+
+
+    R_result(i) = ...
+        top_K_table.R(k_index_i);
 
 end
 
+
 %% ----------------------------------------------------------
-% Create LQG results table
-% ----------------------------------------------------------
+% Create LQG Results Table
+%% ----------------------------------------------------------
 
 LQG_results_table = table( ...
     lqg_K_index, ...
@@ -883,7 +1814,9 @@ LQG_results_table = table( ...
     QT_result, ...
     QVe_result, ...
     R_result, ...
+    lqg_W_interval, ...
     lqg_W_scale, ...
+    lqg_V_interval, ...
     lqg_V_scale, ...
     lqg_success, ...
     lqg_RMS, ...
@@ -900,7 +1833,9 @@ LQG_results_table = table( ...
     'Q_T', ...
     'Q_Ve', ...
     'R', ...
+    'W_Interval', ...
     'W_Scale', ...
+    'V_Interval', ...
     'V_Scale', ...
     'SuccessRate', ...
     'MeanRMS', ...
@@ -910,18 +1845,22 @@ LQG_results_table = table( ...
     'SaturationIncidence', ...
     'MeanSaturationDuration'});
 
+
+%% ==========================================================
+% Remove Failed LQG Candidates
+%% ==========================================================
+
+valid_LQG = ...
+    isfinite(LQG_results_table.SuccessRate);
+
+
+LQG_results_table = ...
+    LQG_results_table(valid_LQG,:);
+
+
 %% ==========================================================
 % Sort LQG Results
-% ==========================================================
-%
-% Primary criterion:
-%   Maximum convergence rate
-%
-% Secondary criteria:
-%   RMS regulation error
-%   Control energy
-%   Saturation incidence
-%
+%% ==========================================================
 
 LQG_results_table = sortrows( ...
     LQG_results_table, ...
@@ -934,34 +1873,37 @@ LQG_results_table = sortrows( ...
      'ascend', ...
      'ascend'});
 
+
 fprintf('\n');
 fprintf('=========================================================\n');
 fprintf('TOP LQG CONTROLLER/OBSERVER COMBINATIONS\n');
 fprintf('=========================================================\n');
 
+
 disp(LQG_results_table( ...
     1:min(20,height(LQG_results_table)),:));
 
+
 %% ==========================================================
 % Select Best LQG Configuration
-% ==========================================================
+%% ==========================================================
 
-% Maximum observed convergence rate
 maxSuccess = ...
     max(LQG_results_table.SuccessRate);
 
-% Controllers within 1 percentage point of maximum
+
 success_margin = 1.0;
+
 
 eligible = ...
     LQG_results_table.SuccessRate >= ...
     maxSuccess - success_margin;
 
+
 eligible_table = ...
     LQG_results_table(eligible,:);
 
-% Among essentially equivalent convergence rates,
-% prioritize regulation and then control effort.
+
 eligible_table = sortrows( ...
     eligible_table, ...
     {'MeanRMS', ...
@@ -971,13 +1913,82 @@ eligible_table = sortrows( ...
      'ascend', ...
      'ascend'});
 
-best_LQG = eligible_table(1,:);
+
+best_LQG = ...
+    eligible_table(1,:);
+
+
+fprintf('\n');
+fprintf('=========================================================\n');
+fprintf('SELECTED BEST LQG CONFIGURATION\n');
+fprintf('=========================================================\n');
+
+
+fprintf( ...
+    'Success Rate      = %.2f %%\n', ...
+    best_LQG.SuccessRate);
+
+
+fprintf( ...
+    'Mean RMS          = %.6f\n', ...
+    best_LQG.MeanRMS);
+
+
+fprintf( ...
+    'Mean Energy       = %.6f\n', ...
+    best_LQG.MeanEnergy);
+
+
+fprintf( ...
+    'Mean Max Voltage  = %.6f\n', ...
+    best_LQG.MeanMaxVoltage);
+
+
+fprintf( ...
+    'Saturation Inc.   = %.6f %%\n', ...
+    best_LQG.SaturationIncidence);
+
+
+fprintf( ...
+    'Q = diag([%.4g %.4g %.4g %.4g %.4g])\n', ...
+    best_LQG.Q_q, ...
+    best_LQG.Q_qdot, ...
+    best_LQG.Q_Phi, ...
+    best_LQG.Q_T, ...
+    best_LQG.Q_Ve);
+
+
+fprintf( ...
+    'R                 = %.4g\n', ...
+    best_LQG.R);
+
+
+fprintf( ...
+    'W Scale           = %.4g\n', ...
+    best_LQG.W_Scale);
+
+
+fprintf( ...
+    'W Interval        = %d\n', ...
+    best_LQG.W_Interval);
+
+
+fprintf( ...
+    'V Scale           = %.4g\n', ...
+    best_LQG.V_Scale);
+
+
+fprintf( ...
+    'V Interval        = %d\n', ...
+    best_LQG.V_Interval);
+
+
+fprintf('=========================================================\n');
+
 
 %% ==========================================================
 % Recover Best Q, R, W, V, K, and L
-% ==========================================================
-
-best_K_index = best_LQG.KIndex;
+%% ==========================================================
 
 Q_best = diag([ ...
     best_LQG.Q_q, ...
@@ -986,19 +1997,25 @@ Q_best = diag([ ...
     best_LQG.Q_T, ...
     best_LQG.Q_Ve]);
 
-R_best = best_LQG.R;
+
+R_best = ...
+    best_LQG.R;
+
 
 W_best = ...
-    best_LQG.W_Scale * W_nominal;
+    best_LQG.W_Scale*W_nominal;
+
 
 V_best = ...
-    best_LQG.V_Scale * V_nominal;
+    best_LQG.V_Scale*V_nominal;
+
 
 K_best = lqr( ...
     A, ...
     B, ...
     Q_best, ...
     R_best);
+
 
 L_best = lqe( ...
     A, ...
@@ -1007,208 +2024,720 @@ L_best = lqe( ...
     W_best, ...
     V_best);
 
+
 %% ==========================================================
-% Final Results
-% ==========================================================
+% Final LQG Results
+%% ==========================================================
 
 fprintf('\n');
 fprintf('=========================================================\n');
 fprintf('BEST LQG CONFIGURATION\n');
 fprintf('=========================================================\n');
 
+
 disp(best_LQG);
+
 
 fprintf('\nBest Q matrix:\n');
 disp(Q_best);
 
+
 fprintf('Best R:\n');
 disp(R_best);
+
 
 fprintf('Best W matrix:\n');
 disp(W_best);
 
+
 fprintf('Best V matrix:\n');
 disp(V_best);
+
 
 fprintf('Best LQR gain K:\n');
 disp(K_best);
 
+
 fprintf('Best Kalman gain L:\n');
 disp(L_best);
 
+
 fprintf('Closed-loop controller eigenvalues:\n');
-disp(eig(A-B*K_best));
+disp(eig(A - B*K_best));
+
 
 fprintf('Estimator eigenvalues:\n');
-disp(eig(A-L_best*C));
+disp(eig(A - L_best*C));
+
 
 %% ==========================================================
 % Final Summary
-% ==========================================================
+%% ==========================================================
 
 fprintf('\n');
 fprintf('=========================================================\n');
 fprintf('FINAL LQG MONTE CARLO SUMMARY\n');
 fprintf('=========================================================\n');
 
-fprintf('Fixed initial conditions: %d\n',N_IC);
-fprintf('Simulation duration: %.2f s\n',Tsim);
 
-fprintf('LQR candidates evaluated: %d\n', ...
-    N_K_candidates);
+fprintf( ...
+    'Fixed initial conditions: %d\n', ...
+    N_IC);
 
-fprintf('Top LQR controllers retained: %d\n', ...
+
+fprintf( ...
+    'Simulation duration: %.2f s\n', ...
+    Tsim);
+
+
+fprintf( ...
+    'LQR candidates evaluated: %d\n', ...
+    N_QR_candidates);
+
+
+fprintf( ...
+    'Top LQR controllers retained: %d\n', ...
     N_top_K);
 
-fprintf('LQE candidates per controller: %d\n', ...
-    N_L_candidates);
 
-fprintf('Total Stage 1 simulations: %d\n', ...
-    N_K_candidates*N_IC);
+fprintf( ...
+    'Random W/V candidates per controller: %d\n', ...
+    N_WV_candidates);
 
-fprintf('Total Stage 2 simulations: %d\n', ...
-    N_top_K*N_L_candidates*N_IC);
 
-fprintf('Total nonlinear simulations: %d\n', ...
-    N_K_candidates*N_IC + ...
-    N_top_K*N_L_candidates*N_IC);
+fprintf( ...
+    'Total Stage 1 simulations: %d\n', ...
+    N_QR_candidates*N_IC);
 
-fprintf('\nBest convergence rate: %.2f %%\n', ...
+
+fprintf( ...
+    'Total Stage 2 simulations: %d\n', ...
+    N_top_K*N_WV_candidates*N_IC);
+
+
+fprintf( ...
+    'Total nonlinear simulations: %d\n', ...
+    N_QR_candidates*N_IC + ...
+    N_top_K*N_WV_candidates*N_IC);
+
+
+fprintf( ...
+    'Best convergence rate: %.2f %%\n', ...
     best_LQG.SuccessRate);
 
-fprintf('Best mean RMS error: %.6f\n', ...
+
+fprintf( ...
+    'Best mean RMS error: %.6f\n', ...
     best_LQG.MeanRMS);
 
-fprintf('Best mean settling time: %.6f s\n', ...
+
+fprintf( ...
+    'Best mean settling time: %.6f s\n', ...
     best_LQG.MeanSettlingTime);
 
-fprintf('Best mean control energy: %.6f\n', ...
+
+fprintf( ...
+    'Best mean control energy: %.6f\n', ...
     best_LQG.MeanEnergy);
 
-fprintf('Best mean maximum voltage: %.6f\n', ...
+
+fprintf( ...
+    'Best mean maximum voltage: %.6f\n', ...
     best_LQG.MeanMaxVoltage);
 
-fprintf('Best saturation incidence: %.2f %%\n', ...
+
+fprintf( ...
+    'Best saturation incidence: %.2f %%\n', ...
     best_LQG.SaturationIncidence);
 
-fprintf('Best mean saturation duration: %.6f %%\n', ...
+
+fprintf( ...
+    'Best mean saturation duration: %.6f %%\n', ...
     best_LQG.MeanSaturationDuration);
 
-%% ==========================================================
-% Local Nonlinear LQG Dynamics Function
-% ==========================================================
 
-function dz = lqg_nonlinear_dynamics( ...
-    t,z,A,B,C,L,K,...
-    M,C_v,K_v,...
-    phi_p_0,T_0,V_e_0,...
-    alpha_B,alpha_E,...
-    gamma_Phi,k_Phi,k_E,...
+%% ==========================================================
+% BEST LQR CONFIGURATION
+%% ==========================================================
+
+best_K_row = ...
+    K_results_table(1,:);
+
+
+fprintf('\n');
+fprintf('=========================================================\n');
+fprintf('BEST LQR CONFIGURATION\n');
+fprintf('=========================================================\n');
+
+
+fprintf( ...
+    'Success Rate          = %.2f %%\n', ...
+    best_K_row.SuccessRate);
+
+
+fprintf( ...
+    'Mean RMS Error        = %.6f\n', ...
+    best_K_row.MeanRMS);
+
+
+fprintf( ...
+    'Mean Settling Time    = %.6f s\n', ...
+    best_K_row.MeanSettlingTime);
+
+
+fprintf( ...
+    'Mean Control Energy   = %.6f\n', ...
+    best_K_row.MeanEnergy);
+
+
+fprintf( ...
+    'Mean Maximum Voltage  = %.6f\n', ...
+    best_K_row.MeanMaxVoltage);
+
+
+fprintf( ...
+    'Saturation Incidence  = %.2f %%\n', ...
+    best_K_row.SaturationIncidence);
+
+
+fprintf( ...
+    'Mean Saturation Time  = %.6f %%\n', ...
+    best_K_row.MeanSaturationDuration);
+
+
+fprintf('\n');
+
+
+fprintf( ...
+    'Q = diag([%.6g %.6g %.6g %.6g %.6g])\n', ...
+    best_K_row.Q_q, ...
+    best_K_row.Q_qdot, ...
+    best_K_row.Q_Phi, ...
+    best_K_row.Q_T, ...
+    best_K_row.Q_Ve);
+
+
+fprintf( ...
+    'R = %.6g\n', ...
+    best_K_row.R);
+
+
+fprintf('\n');
+fprintf('LQR Gain K:\n');
+
+
+K_best_stage1 = [ ...
+    best_K_row.K_q, ...
+    best_K_row.K_qdot, ...
+    best_K_row.K_Phi, ...
+    best_K_row.K_T, ...
+    best_K_row.K_Ve];
+
+
+disp(K_best_stage1);
+
+
+%% ==========================================================
+% BEST CONFIGURATION BY INDIVIDUAL METRIC
+%% ==========================================================
+
+[~,idx_success] = ...
+    max(K_results_table.SuccessRate);
+
+
+[~,idx_rms] = ...
+    min(K_results_table.MeanRMS);
+
+
+[~,idx_settle] = ...
+    min(K_results_table.MeanSettlingTime);
+
+
+[~,idx_energy] = ...
+    min(K_results_table.MeanEnergy);
+
+
+[~,idx_voltage] = ...
+    min(K_results_table.MeanMaxVoltage);
+
+
+[~,idx_sat] = ...
+    min(K_results_table.SaturationIncidence);
+
+
+metric_idx = [ ...
+    idx_success;
+    idx_rms;
+    idx_settle;
+    idx_energy;
+    idx_voltage;
+    idx_sat];
+
+
+metric_name = { ...
+    'Highest Success Rate';
+    'Lowest RMS Error';
+    'Fastest Settling';
+    'Lowest Control Energy';
+    'Lowest Maximum Voltage';
+    'Lowest Saturation Incidence'};
+
+
+best_by_metric = table( ...
+    metric_name, ...
+    K_results_table.SuccessRate(metric_idx), ...
+    K_results_table.MeanRMS(metric_idx), ...
+    K_results_table.MeanSettlingTime(metric_idx), ...
+    K_results_table.MeanEnergy(metric_idx), ...
+    K_results_table.MeanMaxVoltage(metric_idx), ...
+    K_results_table.SaturationIncidence(metric_idx), ...
+    'VariableNames',{ ...
+    'Metric', ...
+    'SuccessRate', ...
+    'MeanRMS', ...
+    'MeanSettlingTime', ...
+    'MeanEnergy', ...
+    'MeanMaxVoltage', ...
+    'SaturationIncidence'});
+
+
+fprintf('\n');
+fprintf('=========================================================\n');
+fprintf('BEST LQR CONFIGURATION BY INDIVIDUAL METRIC\n');
+fprintf('=========================================================\n');
+
+
+disp(best_by_metric);
+
+
+%% ==========================================================
+% LOCAL FUNCTION:
+% Equal-Probability Interval Sampling
+%% ==========================================================
+
+function [values,interval_index] = ...
+    sample_equal_probability_intervals(intervals,N)
+
+% Number of intervals
+
+N_intervals = ...
+    size(intervals,1);
+
+
+% Randomly select one interval for every sample.
+%
+% Every interval has exactly 1/N_intervals probability.
+
+interval_index = ...
+    randi(N_intervals,N,1);
+
+
+% Allocate output
+
+values = ...
+    zeros(N,1);
+
+
+% Uniformly sample within selected interval
+
+for i = 1:N
+
+    j = ...
+        interval_index(i);
+
+
+    lower_bound = ...
+        intervals(j,1);
+
+
+    upper_bound = ...
+        intervals(j,2);
+
+
+    values(i) = ...
+        lower_bound + ...
+        (upper_bound-lower_bound)*rand;
+
+end
+
+end
+
+
+%% ==========================================================
+% LOCAL FUNCTION:
+% Nonlinear LQR Dynamics
+%% ==========================================================
+
+function dx = ...
+    lqr_nonlinear_dynamics( ...
+    t,x,K, ...
+    M,C_v,K_v, ...
+    phi_p_0,T_0,V_e_0, ...
+    alpha_B,alpha_E, ...
+    gamma_Phi,k_Phi,k_E, ...
     C_th,h,tau_e,V_max)
 
 %% ----------------------------------------------------------
-% Plant and observer states
-% ----------------------------------------------------------
-
-x = z(1:5);
-x_hat = z(6:10);
-
+% Force State Vector to Column Orientation
 %% ----------------------------------------------------------
-% Estimated-state feedback
-% ----------------------------------------------------------
 
-u_cmd = -K*x_hat;
+x = ...
+    x(:);
 
-%% ----------------------------------------------------------
-% Physical actuator saturation
-% ----------------------------------------------------------
 
-u = max(min(u_cmd,V_max),-V_max);
+%% ==========================================================
+% Physical States
+%% ==========================================================
 
-%% ----------------------------------------------------------
-% Nonlinear plant states
-% ----------------------------------------------------------
+q = ...
+    x(1);
 
-q     = x(1);
-q_dot = x(2);
-Phi_p = x(3);
-T     = x(4);
-V_e   = x(5);
 
-%% ----------------------------------------------------------
-% Nonlinear plant dynamics
-% ----------------------------------------------------------
+q_dot = ...
+    x(2);
 
-x_dot = [
+
+Phi_p = ...
+    x(3);
+
+
+T = ...
+    x(4);
+
+
+V_e = ...
+    x(5);
+
+
+%% ==========================================================
+% Perturbation Coordinates
+%% ==========================================================
+
+x_pert = zeros(5,1);
+
+
+x_pert(1) = ...
+    q;
+
+
+x_pert(2) = ...
     q_dot;
 
-    (-C_v*q_dot ...
+
+x_pert(3) = ...
+    Phi_p - phi_p_0;
+
+
+x_pert(4) = ...
+    T - T_0;
+
+
+x_pert(5) = ...
+    V_e - V_e_0;
+
+
+%% ==========================================================
+% LQR State Feedback
+%% ==========================================================
+
+u_cmd = ...
+    -K*x_pert;
+
+
+%% ==========================================================
+% Physical Actuator Saturation
+%% ==========================================================
+
+u = max( ...
+    min(u_cmd,V_max), ...
+    -V_max);
+
+
+u = ...
+    u(1);
+
+
+%% ==========================================================
+% Nonlinear Plant Dynamics
+%% ==========================================================
+
+dx = ...
+    zeros(5,1);
+
+
+%% ----------------------------------------------------------
+% Mechanical Position
+%% ----------------------------------------------------------
+
+dx(1) = ...
+    q_dot;
+
+
+%% ----------------------------------------------------------
+% Mechanical Velocity
+%% ----------------------------------------------------------
+
+dx(2) = ...
+    ( ...
+    -C_v*q_dot ...
     -K_v*q ...
     +alpha_B*Phi_p^2 ...
     +alpha_E*V_e^2 ...
     -alpha_B*phi_p_0^2 ...
-    -alpha_E*V_e_0^2)/M;
+    -alpha_E*V_e_0^2 ...
+    ) / M;
 
-    -gamma_Phi*(Phi_p - phi_p_0);
 
-    (k_E*V_e^2 ...
+%% ----------------------------------------------------------
+% Electromagnetic Flux Perturbation Dynamics
+%% ----------------------------------------------------------
+
+dx(3) = ...
+    -gamma_Phi*(Phi_p-phi_p_0);
+
+
+%% ----------------------------------------------------------
+% Thermal Dynamics
+%% ----------------------------------------------------------
+
+dx(4) = ...
+    ( ...
+    k_E*V_e^2 ...
     +k_Phi*Phi_p^2 ...
     -h*(T-T_0) ...
     -k_E*V_e_0^2 ...
-    -k_Phi*phi_p_0^2)/C_th;
+    -k_Phi*phi_p_0^2 ...
+    ) / C_th;
 
+
+%% ----------------------------------------------------------
+% Electrical Actuator Dynamics
+%% ----------------------------------------------------------
+
+dx(5) = ...
     -(V_e-V_e_0)/tau_e ...
-    + u/tau_e
-];
+    +u/tau_e;
+
+end
+
+
+%% ==========================================================
+% LOCAL FUNCTION:
+% Nonlinear LQG Dynamics
+%% ==========================================================
+
+function dz = ...
+    lqg_nonlinear_dynamics( ...
+    t,z,A,B,C,L,K, ...
+    M,C_v,K_v, ...
+    phi_p_0,T_0,V_e_0, ...
+    alpha_B,alpha_E, ...
+    gamma_Phi,k_Phi,k_E, ...
+    C_th,h,tau_e,V_max)
 
 %% ----------------------------------------------------------
-% Convert physical plant state to perturbation coordinates
-% ----------------------------------------------------------
+% Force Combined State Vector to Column Orientation
+%% ----------------------------------------------------------
 
-x_pert = [
+z = ...
+    z(:);
+
+
+%% ==========================================================
+% Plant and Observer States
+%% ==========================================================
+
+x = ...
+    z(1:5);
+
+
+x_hat = ...
+    z(6:10);
+
+
+%% ==========================================================
+% Estimated-State Feedback
+%% ==========================================================
+
+u_cmd = ...
+    -K*x_hat;
+
+
+%% ==========================================================
+% Physical Actuator Saturation
+%% ==========================================================
+
+u = max( ...
+    min(u_cmd,V_max), ...
+    -V_max);
+
+
+u = ...
+    u(1);
+
+
+%% ==========================================================
+% Nonlinear Plant States
+%% ==========================================================
+
+q = ...
     x(1);
+
+
+q_dot = ...
     x(2);
-    x(3) - phi_p_0;
-    x(4) - T_0;
-    x(5) - V_e_0
-];
+
+
+Phi_p = ...
+    x(3);
+
+
+T = ...
+    x(4);
+
+
+V_e = ...
+    x(5);
+
+
+%% ==========================================================
+% Nonlinear Plant Dynamics
+%% ==========================================================
+
+x_dot = ...
+    zeros(5,1);
+
 
 %% ----------------------------------------------------------
+% Mechanical Position
+%% ----------------------------------------------------------
+
+x_dot(1) = ...
+    q_dot;
+
+
+%% ----------------------------------------------------------
+% Mechanical Velocity
+%% ----------------------------------------------------------
+
+x_dot(2) = ...
+    ( ...
+    -C_v*q_dot ...
+    -K_v*q ...
+    +alpha_B*Phi_p^2 ...
+    +alpha_E*V_e^2 ...
+    -alpha_B*phi_p_0^2 ...
+    -alpha_E*V_e_0^2 ...
+    ) / M;
+
+
+%% ----------------------------------------------------------
+% Electromagnetic Flux Perturbation Dynamics
+%% ----------------------------------------------------------
+
+x_dot(3) = ...
+    -gamma_Phi*(Phi_p-phi_p_0);
+
+
+%% ----------------------------------------------------------
+% Thermal Dynamics
+%% ----------------------------------------------------------
+
+x_dot(4) = ...
+    ( ...
+    k_E*V_e^2 ...
+    +k_Phi*Phi_p^2 ...
+    -h*(T-T_0) ...
+    -k_E*V_e_0^2 ...
+    -k_Phi*phi_p_0^2 ...
+    ) / C_th;
+
+
+%% ----------------------------------------------------------
+% Electrical Actuator Dynamics
+%% ----------------------------------------------------------
+
+x_dot(5) = ...
+    -(V_e-V_e_0)/tau_e ...
+    +u/tau_e;
+
+
+%% ==========================================================
+% Convert Physical Plant State to Perturbation Coordinates
+%% ==========================================================
+
+x_pert = ...
+    zeros(5,1);
+
+
+x_pert(1) = ...
+    q;
+
+
+x_pert(2) = ...
+    q_dot;
+
+
+x_pert(3) = ...
+    Phi_p-phi_p_0;
+
+
+x_pert(4) = ...
+    T-T_0;
+
+
+x_pert(5) = ...
+    V_e-V_e_0;
+
+
+%% ==========================================================
 % Measurements
-% ----------------------------------------------------------
-%
-% The observer is formulated in perturbation coordinates:
-%
-%   x = [q; qdot; delta_Phi_p; delta_T; delta_V_e]
-%
-% Therefore the measured output must also be expressed in
-% perturbation coordinates.
-%
+%% ==========================================================
 
-y = C*x_pert;
+y = ...
+    C*x_pert;
+
 
 %% ----------------------------------------------------------
-% Estimated measurements
-% ----------------------------------------------------------
-
-y_hat = C*x_hat;
-
+% Estimated Measurements
 %% ----------------------------------------------------------
-% Linear Kalman observer
-% ----------------------------------------------------------
+
+y_hat = ...
+    C*x_hat;
+
+
+%% ==========================================================
+% Linear Kalman Observer
+%% ==========================================================
+%
+% The observer operates in perturbation coordinates:
+%
+%   x_hat_dot = A*x_hat + B*u + L*(y-y_hat)
+%
+% The same saturated physical input applied to the nonlinear
+% plant is supplied to the observer.
+%
+% ==========================================================
 
 x_hat_dot = ...
     A*x_hat ...
-    + B*u ...
-    + L*(y-y_hat);
+    +B*u ...
+    +L*(y-y_hat);
 
-%% ----------------------------------------------------------
-% Combined plant + observer dynamics
-% ----------------------------------------------------------
 
-dz = [
+%% ==========================================================
+% Combined Plant + Observer Dynamics
+%% ==========================================================
+
+dz = ...
+    zeros(10,1);
+
+
+dz(1:5) = ...
     x_dot;
-    x_hat_dot
-];
+
+
+dz(6:10) = ...
+    x_hat_dot;
 
 end
