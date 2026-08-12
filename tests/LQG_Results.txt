@@ -1,0 +1,553 @@
+%% ==========================================================
+% Stage 2 LQG Results Table
+% ==========================================================
+
+Qq_result   = zeros(N_LQG_candidates,1);
+Qqd_result  = zeros(N_LQG_candidates,1);
+Qphi_result = zeros(N_LQG_candidates,1);
+QT_result   = zeros(N_LQG_candidates,1);
+QVe_result  = zeros(N_LQG_candidates,1);
+R_result    = zeros(N_LQG_candidates,1);
+
+for i = 1:N_LQG_candidates
+
+    k_index_i = lqg_K_index(i);
+
+    Qq_result(i)   = top_K_table.Q_q(k_index_i);
+    Qqd_result(i)  = top_K_table.Q_qdot(k_index_i);
+    Qphi_result(i) = top_K_table.Q_Phi(k_index_i);
+    QT_result(i)   = top_K_table.Q_T(k_index_i);
+    QVe_result(i)  = top_K_table.Q_Ve(k_index_i);
+    R_result(i)    = top_K_table.R(k_index_i);
+
+end
+
+%% ----------------------------------------------------------
+% Create LQG Results Table
+% ----------------------------------------------------------
+
+LQG_results_table = table( ...
+    lqg_K_index, ...
+    Qq_result, ...
+    Qqd_result, ...
+    Qphi_result, ...
+    QT_result, ...
+    QVe_result, ...
+    R_result, ...
+    lqg_W_scale, ...
+    lqg_V_scale, ...
+    lqg_success, ...
+    lqg_RMS, ...
+    lqg_settle, ...
+    lqg_energy, ...
+    lqg_maxVoltage, ...
+    lqg_saturation, ...
+    lqg_satDuration, ...
+    'VariableNames',{ ...
+    'KIndex', ...
+    'Q_q', ...
+    'Q_qdot', ...
+    'Q_Phi', ...
+    'Q_T', ...
+    'Q_Ve', ...
+    'R', ...
+    'W_Scale', ...
+    'V_Scale', ...
+    'SuccessRate', ...
+    'MeanRMS', ...
+    'MeanSettlingTime', ...
+    'MeanEnergy', ...
+    'MeanMaxVoltage', ...
+    'SaturationIncidence', ...
+    'MeanSaturationDuration'});
+
+%% ==========================================================
+% Remove Failed LQG Candidates
+% ==========================================================
+
+valid_LQG = ...
+    isfinite(LQG_results_table.SuccessRate);
+
+LQG_results_table = ...
+    LQG_results_table(valid_LQG,:);
+
+%% ==========================================================
+% Sort LQG Results
+% ==========================================================
+
+LQG_results_table = sortrows( ...
+    LQG_results_table, ...
+    {'SuccessRate', ...
+     'MeanRMS', ...
+     'MeanEnergy', ...
+     'SaturationIncidence'}, ...
+    {'descend', ...
+     'ascend', ...
+     'ascend', ...
+     'ascend'});
+
+fprintf('\n');
+
+fprintf('=========================================================\n');
+=========================================================
+fprintf('TOP LQG CONTROLLER/OBSERVER COMBINATIONS\n');
+TOP LQG CONTROLLER/OBSERVER COMBINATIONS
+fprintf('=========================================================\n');
+=========================================================
+
+disp(LQG_results_table( ...
+    1:min(20,height(LQG_results_table)),:));
+    <strong>KIndex</strong>    <strong>Q_q</strong>    <strong>Q_qdot</strong>    <strong>Q_Phi</strong>    <strong>Q_T</strong>    <strong>Q_Ve</strong>     <strong>R</strong>      <strong>W_Scale</strong>    <strong>V_Scale</strong>    <strong>SuccessRate</strong>    <strong>MeanRMS</strong>    <strong>MeanSettlingTime</strong>    <strong>MeanEnergy</strong>    <strong>MeanMaxVoltage</strong>    <strong>SaturationIncidence</strong>    <strong>MeanSaturationDuration</strong>
+    <strong>______</strong>    <strong>___</strong>    <strong>______</strong>    <strong>_____</strong>    <strong>___</strong>    <strong>____</strong>    <strong>____</strong>    <strong>_______</strong>    <strong>_______</strong>    <strong>___________</strong>    <strong>_______</strong>    <strong>________________</strong>    <strong>__________</strong>    <strong>______________</strong>    <strong>___________________</strong>    <strong>______________________</strong>
+
+      3       100      40         5     10      1      0.25      0.1        0.1          100        0.12642          5.709           2.6481          1.2769                 0                       0           
+      1       100      40        10     10      1      0.25      0.1        0.1          100        0.12642          5.709           2.6481          1.2769                 0                       0           
+      2       100      40       2.5     10      1      0.25      0.1        0.1          100        0.12642          5.709           2.6481          1.2769                 0                       0           
+      4       100      40         1     10      1      0.25      0.1        0.1          100        0.12642          5.709           2.6481          1.2769                 0                       0           
+      1       100      40        10     10      1      0.25       10         10          100        0.12642          5.709           2.6481          1.2769                 0                       0           
+      2       100      40       2.5     10      1      0.25       10         10          100        0.12642          5.709           2.6481          1.2769                 0                       0           
+      4       100      40         1     10      1      0.25       10         10          100        0.12642          5.709           2.6481          1.2769                 0                       0           
+      3       100      40         5     10      1      0.25       10         10          100        0.12642          5.709           2.6481          1.2769                 0                       0           
+      1       100      40        10     10      1      0.25        1          1          100        0.12642          5.709           2.6481          1.2769                 0                       0           
+      4       100      40         1     10      1      0.25        1          1          100        0.12642          5.709           2.6481          1.2769                 0                       0           
+      2       100      40       2.5     10      1      0.25        1          1          100        0.12642          5.709           2.6481          1.2769                 0                       0           
+      3       100      40         5     10      1      0.25        1          1          100        0.12642          5.709           2.6481          1.2769                 0                       0           
+      7       100      40         5      5      1      0.25      0.1        0.1          100        0.12642         5.6227             2.66          1.2806                 0                       0           
+      8       100      40        10      5      1      0.25      0.1        0.1          100        0.12642         5.6227             2.66          1.2806                 0                       0           
+      6       100      40         1      5      1      0.25        1          1          100        0.12642         5.6227             2.66          1.2806                 0                       0           
+      6       100      40         1      5      1      0.25       10         10          100        0.12642         5.6227             2.66          1.2806                 0                       0           
+      8       100      40        10      5      1      0.25        1          1          100        0.12642         5.6227             2.66          1.2806                 0                       0           
+      5       100      40       2.5      5      1      0.25      0.1        0.1          100        0.12642         5.6227             2.66          1.2806                 0                       0           
+      6       100      40         1      5      1      0.25      0.1        0.1          100        0.12642         5.6227             2.66          1.2806                 0                       0           
+      5       100      40       2.5      5      1      0.25        1          1          100        0.12642         5.6227             2.66          1.2806                 0                       0           
+
+
+%% ==========================================================
+% Select Best LQG Configuration
+% ==========================================================
+
+maxSuccess = ...
+    max(LQG_results_table.SuccessRate);
+
+success_margin = 1.0;
+
+eligible = ...
+    LQG_results_table.SuccessRate >= ...
+    maxSuccess - success_margin;
+
+eligible_table = ...
+    LQG_results_table(eligible,:);
+
+eligible_table = sortrows( ...
+    eligible_table, ...
+    {'MeanRMS', ...
+     'MeanEnergy', ...
+     'SaturationIncidence'}, ...
+    {'ascend', ...
+     'ascend', ...
+     'ascend'});
+
+best_LQG = eligible_table(1,:);
+
+fprintf('\n');
+
+fprintf('=========================================================\n');
+=========================================================
+fprintf('SELECTED BEST LQG CONFIGURATION\n');
+SELECTED BEST LQG CONFIGURATION
+fprintf('=========================================================\n');
+=========================================================
+
+fprintf('Success Rate      = %.2f %%\n', ...
+    best_LQG.SuccessRate);
+Success Rate      = 100.00 %
+
+fprintf('Mean RMS          = %.6f\n', ...
+    best_LQG.MeanRMS);
+Mean RMS          = 0.126420
+
+fprintf('Mean Energy       = %.6f\n', ...
+    best_LQG.MeanEnergy);
+Mean Energy       = 2.648147
+
+fprintf('Mean Max Voltage  = %.6f\n', ...
+    best_LQG.MeanMaxVoltage);
+Mean Max Voltage  = 1.276876
+
+fprintf('Saturation Inc.   = %.6f %%\n', ...
+    best_LQG.SaturationIncidence);
+Saturation Inc.   = 0.000000 %
+
+fprintf('Q = diag([%.4g %.4g %.4g %.4g %.4g])\n', ...
+    best_LQG.Q_q, ...
+    best_LQG.Q_qdot, ...
+    best_LQG.Q_Phi, ...
+    best_LQG.Q_T, ...
+    best_LQG.Q_Ve);
+Q = diag([100 40 5 10 1])
+
+fprintf('R                 = %.4g\n', ...
+    best_LQG.R);
+R                 = 0.25
+
+fprintf('W Scale           = %.4g\n', ...
+    best_LQG.W_Scale);
+W Scale           = 0.1
+
+fprintf('V Scale           = %.4g\n', ...
+    best_LQG.V_Scale);
+V Scale           = 0.1
+
+fprintf('=========================================================\n');
+=========================================================
+
+%% ==========================================================
+% Recover Best Q, R, W, V, K, and L
+% ==========================================================
+
+Q_best = diag([ ...
+    best_LQG.Q_q, ...
+    best_LQG.Q_qdot, ...
+    best_LQG.Q_Phi, ...
+    best_LQG.Q_T, ...
+    best_LQG.Q_Ve]);
+
+R_best = ...
+    best_LQG.R;
+
+W_best = ...
+    best_LQG.W_Scale * W_nominal;
+
+V_best = ...
+    best_LQG.V_Scale * V_nominal;
+
+K_best = lqr( ...
+    A, ...
+    B, ...
+    Q_best, ...
+    R_best);
+
+L_best = lqe( ...
+    A, ...
+    eye(5), ...
+    C, ...
+    W_best, ...
+    V_best);
+
+%% ==========================================================
+% Final Results
+% ==========================================================
+
+fprintf('\n');
+
+fprintf('=========================================================\n');
+=========================================================
+fprintf('BEST LQG CONFIGURATION\n');
+BEST LQG CONFIGURATION
+fprintf('=========================================================\n');
+=========================================================
+
+disp(best_LQG);
+    <strong>KIndex</strong>    <strong>Q_q</strong>    <strong>Q_qdot</strong>    <strong>Q_Phi</strong>    <strong>Q_T</strong>    <strong>Q_Ve</strong>     <strong>R</strong>      <strong>W_Scale</strong>    <strong>V_Scale</strong>    <strong>SuccessRate</strong>    <strong>MeanRMS</strong>    <strong>MeanSettlingTime</strong>    <strong>MeanEnergy</strong>    <strong>MeanMaxVoltage</strong>    <strong>SaturationIncidence</strong>    <strong>MeanSaturationDuration</strong>
+    <strong>______</strong>    <strong>___</strong>    <strong>______</strong>    <strong>_____</strong>    <strong>___</strong>    <strong>____</strong>    <strong>____</strong>    <strong>_______</strong>    <strong>_______</strong>    <strong>___________</strong>    <strong>_______</strong>    <strong>________________</strong>    <strong>__________</strong>    <strong>______________</strong>    <strong>___________________</strong>    <strong>______________________</strong>
+
+      3       100      40        5      10      1      0.25      0.1        0.1          100        0.12642         5.709            2.6481          1.2769                 0                       0           
+
+
+fprintf('\nBest Q matrix:\n');
+
+Best Q matrix:
+disp(Q_best);
+   100     0     0     0     0
+     0    40     0     0     0
+     0     0     5     0     0
+     0     0     0    10     0
+     0     0     0     0     1
+
+
+fprintf('Best R:\n');
+Best R:
+disp(R_best);
+    0.2500
+
+
+fprintf('Best W matrix:\n');
+Best W matrix:
+disp(W_best);
+   1.0e-03 *
+
+    0.1000         0         0         0         0
+         0    1.0000         0         0         0
+         0         0    0.0100         0         0
+         0         0         0    0.0100         0
+         0         0         0         0    0.1000
+
+
+fprintf('Best V matrix:\n');
+Best V matrix:
+disp(V_best);
+   1.0e-04 *
+
+    1.0000         0         0         0
+         0    0.1000         0         0
+         0         0    1.0000         0
+         0         0         0    1.0000
+
+
+fprintf('Best LQR gain K:\n');
+Best LQR gain K:
+disp(K_best);
+    6.8601   15.0483    1.5469    1.3164    1.3954
+
+
+fprintf('Best Kalman gain L:\n');
+Best Kalman gain L:
+disp(L_best);
+    1.7923    0.0490    0.0005    0.0001
+    1.1063    0.1373    0.0010    0.0011
+    0.0049    0.8610    0.0049   -0.0000
+    0.0005    0.0487    0.1538    0.0003
+    0.0001   -0.0000    0.0003    0.0499
+
+
+fprintf('Closed-loop controller eigenvalues:\n');
+Closed-loop controller eigenvalues:
+disp(eig(A - B*K_best));
+ -22.3192 + 0.0000i
+  -0.9527 + 1.4811i
+  -0.9527 - 1.4811i
+  -0.2798 + 0.0000i
+  -0.1500 + 0.0000i
+
+
+fprintf('Estimator eigenvalues:\n');
+Estimator eigenvalues:
+disp(eig(A - L_best*C));
+ -10.0499 + 0.0000i
+  -1.0459 + 1.6731i
+  -1.0459 - 1.6731i
+  -1.0112 + 0.0000i
+  -0.4041 + 0.0000i
+
+
+%% ==========================================================
+% Final Summary
+% ==========================================================
+
+fprintf('\n');
+
+fprintf('=========================================================\n');
+=========================================================
+fprintf('FINAL LQG MONTE CARLO SUMMARY\n');
+FINAL LQG MONTE CARLO SUMMARY
+fprintf('=========================================================\n');
+=========================================================
+
+fprintf('Fixed initial conditions: %d\n', ...
+    N_IC);
+Fixed initial conditions: 1000
+
+fprintf('Simulation duration: %.2f s\n', ...
+    Tsim);
+Simulation duration: 10.00 s
+
+fprintf('LQR candidates evaluated: %d\n', ...
+    N_K_candidates);
+LQR candidates evaluated: 8000
+
+fprintf('Top LQR controllers retained: %d\n', ...
+    N_top_K);
+Top LQR controllers retained: 10
+
+fprintf('LQE candidates per controller: %d\n', ...
+    N_L_candidates);
+LQE candidates per controller: 9
+
+fprintf('Total Stage 1 simulations: %d\n', ...
+    N_K_candidates*N_IC);
+Total Stage 1 simulations: 8000000
+
+fprintf('Total Stage 2 simulations: %d\n', ...
+    N_top_K*N_L_candidates*N_IC);
+Total Stage 2 simulations: 90000
+
+fprintf('Total nonlinear simulations: %d\n', ...
+    N_K_candidates*N_IC + ...
+    N_top_K*N_L_candidates*N_IC);
+Total nonlinear simulations: 8090000
+
+fprintf('Best convergence rate: %.2f %%\n', ...
+    best_LQG.SuccessRate);
+Best convergence rate: 100.00 %
+
+fprintf('Best mean RMS error: %.6f\n', ...
+    best_LQG.MeanRMS);
+Best mean RMS error: 0.126420
+
+fprintf('Best mean settling time: %.6f s\n', ...
+    best_LQG.MeanSettlingTime);
+Best mean settling time: 5.709030 s
+
+fprintf('Best mean control energy: %.6f\n', ...
+    best_LQG.MeanEnergy);
+Best mean control energy: 2.648147
+
+fprintf('Best mean maximum voltage: %.6f\n', ...
+    best_LQG.MeanMaxVoltage);
+Best mean maximum voltage: 1.276876
+
+fprintf('Best saturation incidence: %.2f %%\n', ...
+    best_LQG.SaturationIncidence);
+Best saturation incidence: 0.00 %
+
+fprintf('Best mean saturation duration: %.6f %%\n', ...
+    best_LQG.MeanSaturationDuration);
+Best mean saturation duration: 0.000000 %
+
+%% ==========================================================
+% BEST LQR CONFIGURATION
+% ==========================================================
+
+best_K_row = K_results_table(1,:);
+
+fprintf('\n');
+
+fprintf('=========================================================\n');
+=========================================================
+fprintf('BEST LQR CONFIGURATION\n');
+BEST LQR CONFIGURATION
+fprintf('=========================================================\n');
+=========================================================
+
+fprintf('Success Rate          = %.2f %%\n', ...
+    best_K_row.SuccessRate);
+Success Rate          = 100.00 %
+
+fprintf('Mean RMS Error        = %.6f\n', ...
+    best_K_row.MeanRMS);
+Mean RMS Error        = 0.126420
+
+fprintf('Mean Settling Time    = %.6f s\n', ...
+    best_K_row.MeanSettlingTime);
+Mean Settling Time    = 5.709030 s
+
+fprintf('Mean Control Energy   = %.6f\n', ...
+    best_K_row.MeanEnergy);
+Mean Control Energy   = 2.648147
+
+fprintf('Mean Maximum Voltage  = %.6f\n', ...
+    best_K_row.MeanMaxVoltage);
+Mean Maximum Voltage  = 1.276876
+
+fprintf('Saturation Incidence  = %.2f %%\n', ...
+    best_K_row.SaturationIncidence);
+Saturation Incidence  = 0.00 %
+
+fprintf('Mean Saturation Time  = %.6f %%\n', ...
+    best_K_row.MeanSaturationDuration);
+Mean Saturation Time  = 0.000000 %
+
+fprintf('\n');
+
+fprintf('Q = diag([%.6g %.6g %.6g %.6g %.6g])\n', ...
+    best_K_row.Q_q, ...
+    best_K_row.Q_qdot, ...
+    best_K_row.Q_Phi, ...
+    best_K_row.Q_T, ...
+    best_K_row.Q_Ve);
+Q = diag([100 40 10 10 1])
+
+fprintf('R = %.6g\n', ...
+    best_K_row.R);
+R = 0.25
+
+fprintf('\n');
+
+fprintf('LQR Gain K:\n');
+LQR Gain K:
+
+K_best_stage1 = [ ...
+    best_K_row.K_q, ...
+    best_K_row.K_qdot, ...
+    best_K_row.K_Phi, ...
+    best_K_row.K_T, ...
+    best_K_row.K_Ve];
+
+disp(K_best_stage1);
+    6.8601   15.0483    1.5469    1.3164    1.3954
+
+
+%% ==========================================================
+% BEST CONFIGURATION BY INDIVIDUAL METRIC
+% ==========================================================
+
+[~,idx_success] = ...
+    max(K_results_table.SuccessRate);
+
+[~,idx_rms] = ...
+    min(K_results_table.MeanRMS);
+
+[~,idx_settle] = ...
+    min(K_results_table.MeanSettlingTime);
+
+[~,idx_energy] = ...
+    min(K_results_table.MeanEnergy);
+
+[~,idx_voltage] = ...
+    min(K_results_table.MeanMaxVoltage);
+
+[~,idx_sat] = ...
+    min(K_results_table.SaturationIncidence);
+
+metric_idx = [ ...
+    idx_success;
+    idx_rms;
+    idx_settle;
+    idx_energy;
+    idx_voltage;
+    idx_sat];
+
+metric_name = { ...
+    'Highest Success Rate';
+    'Lowest RMS Error';
+    'Fastest Settling';
+    'Lowest Control Energy';
+    'Lowest Maximum Voltage';
+    'Lowest Saturation Incidence'};
+
+best_by_metric = table( ...
+    metric_name, ...
+    K_results_table.SuccessRate(metric_idx), ...
+    K_results_table.MeanRMS(metric_idx), ...
+    K_results_table.MeanSettlingTime(metric_idx), ...
+    K_results_table.MeanEnergy(metric_idx), ...
+    K_results_table.MeanMaxVoltage(metric_idx), ...
+    K_results_table.SaturationIncidence(metric_idx), ...
+    'VariableNames',{ ...
+    'Metric', ...
+    'SuccessRate', ...
+    'MeanRMS', ...
+    'MeanSettlingTime', ...
+    'MeanEnergy', ...
+    'MeanMaxVoltage', ...
+    'SaturationIncidence'});
+
+fprintf('\n');
+
+fprintf('=========================================================\n');
+=========================================================
+fprintf('BEST LQR CONFIGURATION BY INDIVIDUAL METRIC\n');
+BEST LQR CONFIGURATION BY INDIVIDUAL METRIC
+fprintf('=========================================================\n');
+=========================================================
+
+disp(best_by_metric);
+                <strong>Metric</strong>                 <strong>SuccessRate</strong>    <strong>MeanRMS</strong>    <strong>MeanSettlingTime</strong>    <strong>MeanEnergy</strong>    <strong>MeanMaxVoltage</strong>    <strong>SaturationIncidence</strong>
+    <strong>_______________________________</strong>    <strong>___________</strong>    <strong>_______</strong>    <strong>________________</strong>    <strong>__________</strong>    <strong>______________</strong>    <strong>___________________</strong>
+
+    {'Highest Success Rate'       }        100        0.12642          5.709           2.6481          1.2769                 0         
+    {'Lowest RMS Error'           }        100        0.12642          5.709           2.6481          1.2769                 0         
+    {'Fastest Settling'           }        100        0.13725         5.1067           5.9367          1.8806                 0         
+    {'Lowest Control Energy'      }        1.9        0.16053         9.9518           0.1383          0.2224                 0         
+    {'Lowest Maximum Voltage'     }        1.9        0.16053         9.9518           0.1383         0.22234                 0         
+    {'Lowest Saturation Incidence'}        100        0.12642          5.709           2.6481          1.2769                 0         
